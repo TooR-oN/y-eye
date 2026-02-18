@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Electron output
+release/
+*.dmg
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+.dev.vars
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PM2
+.pm2/
+logs/
+*.log
+
+# Backup files
+*.backup
+*.bak
+
+# Y-EYE data (local SQLite DB)
+*.db
+*.db-journal
+*.db-wal
+
+# Wrangler
+.wrangler/

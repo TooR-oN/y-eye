@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   Y-EYE Global Styles
+   ============================================ */
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* macOS title bar drag region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Sidebar transitions */
+.sidebar-item {
+  @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+         text-dark-400 hover:text-dark-100 hover:bg-dark-800/60
+         transition-all duration-150 cursor-pointer;
+}
+.sidebar-item.active {
+  @apply text-yeye-400 bg-yeye-500/10;
+}
+
+/* Card styles */
+.card {
+  @apply bg-dark-800/50 border border-dark-700/50 rounded-xl p-5;
+}
+.card-hover {
+  @apply card hover:border-dark-600/50 hover:bg-dark-800/70 transition-all duration-200 cursor-pointer;
+}
+
+/* Status badges */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+.badge-active { @apply bg-emerald-500/15 text-emerald-400 border border-emerald-500/20; }
+.badge-closed { @apply bg-red-500/15 text-red-400 border border-red-500/20; }
+.badge-redirected { @apply bg-amber-500/15 text-amber-400 border border-amber-500/20; }
+.badge-unknown { @apply bg-gray-500/15 text-gray-400 border border-gray-500/20; }
+
+/* Priority badges */
+.priority-critical { @apply bg-red-500/15 text-red-400 border border-red-500/20; }
+.priority-high { @apply bg-orange-500/15 text-orange-400 border border-orange-500/20; }
+.priority-medium { @apply bg-yellow-500/15 text-yellow-400 border border-yellow-500/20; }
+.priority-low { @apply bg-blue-500/15 text-blue-400 border border-blue-500/20; }
+
+/* Investigation status */
+.inv-pending { @apply bg-gray-500/15 text-gray-400; }
+.inv-in_progress { @apply bg-blue-500/15 text-blue-400; }
+.inv-completed { @apply bg-emerald-500/15 text-emerald-400; }
+.inv-on_hold { @apply bg-amber-500/15 text-amber-400; }
+
+/* Form inputs */
+.input {
+  @apply w-full bg-dark-900/50 border border-dark-600/50 rounded-lg px-3 py-2 text-sm text-dark-100
+         placeholder-dark-500 focus:outline-none focus:ring-2 focus:ring-yeye-500/50 focus:border-yeye-500/50
+         transition-all duration-150;
+}
+.input-sm {
+  @apply input py-1.5 px-2.5 text-xs;
+}
+
+/* Button styles */
+.btn {
+  @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
+         transition-all duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed;
+}
+.btn-primary {
+  @apply btn bg-yeye-600 text-white hover:bg-yeye-500 active:bg-yeye-700;
+}
+.btn-secondary {
+  @apply btn bg-dark-700 text-dark-200 hover:bg-dark-600 border border-dark-600/50;
+}
+.btn-danger {
+  @apply btn bg-red-600/20 text-red-400 hover:bg-red-600/30 border border-red-500/30;
+}
+.btn-ghost {
+  @apply btn text-dark-400 hover:text-dark-200 hover:bg-dark-800;
+}
+.btn-sm {
+  @apply px-3 py-1.5 text-xs;
+}
+
+/* Select */
+.select {
+  @apply input appearance-none bg-no-repeat cursor-pointer;
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-size: 1.5em 1.5em;
+  padding-right: 2.5rem;
+}
+
+/* Textarea */
+.textarea {
+  @apply input min-h-[100px] resize-y;
+}
+
+/* Table */
+.table-header {
+  @apply text-xs font-medium text-dark-400 uppercase tracking-wider;
+}
+.table-cell {
+  @apply px-4 py-3 text-sm text-dark-200;
+}
+.table-row {
+  @apply border-b border-dark-700/30 hover:bg-dark-800/30 transition-colors;
+}
+
+/* Page title */
+.page-title {
+  @apply text-2xl font-bold text-dark-50 tracking-tight;
+}
+.page-subtitle {
+  @apply text-sm text-dark-400 mt-1;
+}
+
+/* Animation */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
