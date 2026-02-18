@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
-import type { Site, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory } from '@/shared/types'
+import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory } from '@/shared/types'
 import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 
 export default function SiteDetailPage() {
@@ -73,7 +73,7 @@ export default function SiteDetailPage() {
   }
 
   const tabs = [
-    { key: 'osint', label: 'OSINT 정보', count: osintEntries.length },
+    { key: 'osint', label: '인프라 정보', count: osintEntries.length },
     { key: 'persons', label: '연관 인물', count: relatedPersons.length },
     { key: 'timeline', label: '타임라인', count: timeline.length },
     { key: 'history', label: '도메인 이력', count: domainHistory.length },
@@ -201,12 +201,12 @@ export default function SiteDetailPage() {
       {activeTab === 'osint' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-sm font-medium text-dark-300">OSINT 정보 항목</h3>
+            <h3 className="text-sm font-medium text-dark-300">인프라 정보 항목</h3>
             <button onClick={() => setShowAddOsint(true)} className="btn-primary btn-sm">＋ 정보 추가</button>
           </div>
           {osintEntries.length === 0 ? (
             <div className="card text-center py-8">
-              <p className="text-dark-500 text-sm">아직 수집된 OSINT 정보가 없습니다</p>
+              <p className="text-dark-500 text-sm">아직 수집된 인프라 정보가 없습니다</p>
               <button onClick={() => setShowAddOsint(true)} className="btn-primary btn-sm mt-3">＋ 첫 정보 추가</button>
             </div>
           ) : (
@@ -230,18 +230,9 @@ export default function SiteDetailPage() {
               <p className="text-dark-500 text-sm">연결된 인물이 없습니다</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-4">
               {relatedPersons.map(rel => (
-                <div key={rel.id} className="card-hover flex items-center justify-between" onClick={() => navigate(`/persons/${rel.person_id}`)}>
-                  <div>
-                    <p className="text-sm font-medium text-dark-100">{rel.alias || rel.real_name || '미확인'}</p>
-                    <p className="text-xs text-dark-500">
-                      {PERSON_ROLES.find(r => r.value === rel.role)?.label || rel.role || '역할 미지정'} · 
-                      신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === rel.confidence)?.label || rel.confidence}
-                    </p>
-                  </div>
-                  <span className="text-dark-600">→</span>
-                </div>
+                <PersonDetailCard key={rel.id} relation={rel} navigate={navigate} />
               ))}
             </div>
           )}
@@ -335,6 +326,173 @@ function OsintEntryCard({ entry, onDelete }: { entry: OsintEntry; onDelete: () =
         <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === entry.confidence)?.label || entry.confidence}</span>
         <span>{new Date(entry.created_at).toLocaleDateString('ko-KR')}</span>
       </div>
+    </div>
+  )
+}
+
+// ============================================
+// Person Detail Card (연관 인물 탭 - 상세 정보 표시)
+// ============================================
+
+const RISK_COLORS: Record<string, string> = {
+  critical: 'priority-critical', high: 'priority-high', medium: 'priority-medium', low: 'priority-low',
+}
+const RISK_LABELS: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
+const STATUS_LABELS: Record<string, string> = { active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인' }
+
+function PersonDetailCard({ relation, navigate }: { relation: PersonSiteRelation; navigate: (path: string) => void }) {
+  const [person, setPerson] = useState<Person | null>(null)
+  const [personOsint, setPersonOsint] = useState<OsintEntry[]>([])
+  const [personSites, setPersonSites] = useState<PersonSiteRelation[]>([])
+  const [expanded, setExpanded] = useState(true)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadPersonData()
+  }, [relation.person_id])
+
+  async function loadPersonData() {
+    try {
+      const [personData, osintData, sitesData] = await Promise.all([
+        window.electronAPI.persons.get(relation.person_id),
+        window.electronAPI.osint.list({ entity_type: 'person', entity_id: relation.person_id }),
+        window.electronAPI.personSiteRelations.list({ person_id: relation.person_id }),
+      ])
+      setPerson(personData)
+      setPersonOsint(osintData)
+      setPersonSites(sitesData)
+    } catch (err) {
+      console.error('Failed to load person data:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="card animate-pulse h-20" />
+  }
+
+  return (
+    <div className="card p-0 overflow-hidden">
+      {/* Person Header — 항상 표시 */}
+      <div
+        className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-dark-800/30 transition-colors"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-dark-700 flex items-center justify-center text-lg flex-shrink-0">
+            👤
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold text-dark-50">
+                {person?.alias || person?.real_name || '미확인'}
+              </p>
+              {person?.real_name && person?.alias && (
+                <span className="text-xs text-dark-500">({person.real_name})</span>
+              )}
+              <span className={`badge ${RISK_COLORS[person?.risk_level || 'medium']} text-[10px]`}>
+                {RISK_LABELS[person?.risk_level || 'medium']}
+              </span>
+              <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">
+                {STATUS_LABELS[person?.status || 'unknown']}
+              </span>
+            </div>
+            <p className="text-xs text-dark-400 mt-0.5">
+              이 사이트에서의 역할: <span className="text-dark-200">{PERSON_ROLES.find(r => r.value === relation.role)?.label || relation.role || '미지정'}</span>
+              {' · '}신뢰도: <span className={CONFIDENCE_LEVELS.find(c => c.value === relation.confidence)?.color || 'text-dark-400'}>
+                {CONFIDENCE_LEVELS.find(c => c.value === relation.confidence)?.label || relation.confidence}
+              </span>
+              {relation.evidence && (
+                <> · <span className="text-dark-500">근거: {relation.evidence}</span></>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn-ghost btn-sm text-xs"
+            onClick={(e) => { e.stopPropagation(); navigate(`/persons/${relation.person_id}`) }}
+          >
+            상세 →
+          </button>
+          <span className={`text-dark-500 text-xs transition-transform ${expanded ? 'rotate-180' : ''}`}>▼</span>
+        </div>
+      </div>
+
+      {/* Expanded Detail */}
+      {expanded && (
+        <div className="border-t border-dark-700/40 px-5 py-4 space-y-4 bg-dark-900/30">
+          {/* Description */}
+          {person?.description && (
+            <div>
+              <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-1">설명</p>
+              <p className="text-sm text-dark-300">{person.description}</p>
+            </div>
+          )}
+
+          {/* 이 인물이 연관된 다른 사이트들 */}
+          {personSites.length > 1 && (
+            <div>
+              <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">
+                연관 사이트 ({personSites.length}개)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {personSites.map(ps => (
+                  <button
+                    key={ps.id}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-dark-800/60 border border-dark-700/40 rounded-lg text-xs hover:bg-dark-800 hover:border-dark-600/50 transition-all"
+                    onClick={() => navigate(`/sites/${ps.site_id}`)}
+                  >
+                    <span className="text-dark-300">{ps.domain || '알 수 없음'}</span>
+                    <span className="text-[9px] text-dark-500">
+                      ({PERSON_ROLES.find(r => r.value === ps.role)?.label || ps.role || '역할 미지정'})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* OSINT 정보 */}
+          {personOsint.length > 0 ? (
+            <div>
+              <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">
+                수집된 정보 ({personOsint.length}건)
+              </p>
+              <div className="space-y-2">
+                {personOsint.map(entry => {
+                  const cat = OSINT_CATEGORIES.find(c => c.value === entry.category)
+                  return (
+                    <div key={entry.id} className="bg-dark-800/40 border border-dark-700/30 rounded-lg px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">{cat?.icon || '📝'}</span>
+                        <h5 className="text-xs font-medium text-dark-100">{entry.title}</h5>
+                        <span className="text-[9px] text-dark-500 bg-dark-900/60 px-1.5 py-0.5 rounded">
+                          {cat?.label || entry.category || '기타'}
+                        </span>
+                        {entry.is_key_evidence ? (
+                          <span className="text-[9px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">핵심 증거</span>
+                        ) : null}
+                      </div>
+                      {entry.content && (
+                        <p className="text-xs text-dark-400 mt-1.5 whitespace-pre-wrap leading-relaxed">{entry.content}</p>
+                      )}
+                      <div className="flex items-center gap-3 mt-1.5 text-[9px] text-dark-600">
+                        {entry.source && <span>출처: {entry.source}</span>}
+                        <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === entry.confidence)?.label || entry.confidence}</span>
+                        <span>{new Date(entry.created_at).toLocaleDateString('ko-KR')}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-dark-600 italic">이 인물에 대해 수집된 정보가 아직 없습니다.</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

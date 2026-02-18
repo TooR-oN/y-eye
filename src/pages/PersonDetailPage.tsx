@@ -70,7 +70,7 @@ export default function PersonDetailPage() {
   if (!person) return <div className="p-8"><p className="text-dark-500">인물을 찾을 수 없습니다.</p></div>
 
   const tabs = [
-    { key: 'osint', label: 'OSINT 정보', count: osintEntries.length },
+    { key: 'osint', label: '인프라 정보', count: osintEntries.length },
     { key: 'sites', label: '관련 사이트', count: relatedSites.length },
     { key: 'relations', label: '인물 관계', count: personRelations.length },
   ] as const
@@ -179,7 +179,7 @@ export default function PersonDetailPage() {
       {activeTab === 'osint' && (
         <div className="space-y-4">
           <div className="flex justify-between items-center">
-            <h3 className="text-sm font-medium text-dark-300">OSINT 정보</h3>
+            <h3 className="text-sm font-medium text-dark-300">인프라 정보</h3>
             <button onClick={() => setShowAddOsint(true)} className="btn-primary btn-sm">＋ 정보 추가</button>
           </div>
           {osintEntries.length === 0 ? (
