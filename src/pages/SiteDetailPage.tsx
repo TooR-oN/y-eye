@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
-import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult, EvidenceFile } from '@/shared/types'
+import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult, EvidenceFile, OsintLink } from '@/shared/types'
 import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
 import { useAutoSync } from '@/hooks/useAutoSync'
@@ -17,6 +17,8 @@ export default function SiteDetailPage() {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [domainHistory, setDomainHistory] = useState<DomainHistory[]>([])
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
+  const [linkedOsint, setLinkedOsint] = useState<(OsintLink & { entry: OsintEntry })[]>([])
+  const [osintLinks, setOsintLinks] = useState<Map<string, OsintLink[]>>(new Map()) // entryId → links
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'persons' | 'timeline' | 'history'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
@@ -28,13 +30,14 @@ export default function SiteDetailPage() {
   const loadData = useCallback(async () => {
     if (!id) return
     try {
-      const [siteData, osintData, personsData, timelineData, historyData, evidenceData] = await Promise.all([
+      const [siteData, osintData, personsData, timelineData, historyData, evidenceData, linkedData] = await Promise.all([
         window.electronAPI.sites.get(id),
         window.electronAPI.osint.list({ entity_type: 'site', entity_id: id }),
         window.electronAPI.personSiteRelations.list({ site_id: id }),
         window.electronAPI.timeline.list({ entity_type: 'site', entity_id: id, limit: 20 }),
         window.electronAPI.domainHistory.list(id),
         window.electronAPI.evidence.list({ entity_type: 'site', entity_id: id }),
+        window.electronAPI.osintLinks.listLinkedTo('site', id),
       ])
       setSite(siteData)
       setOsintEntries(osintData)
@@ -42,7 +45,16 @@ export default function SiteDetailPage() {
       setTimeline(timelineData)
       setDomainHistory(historyData)
       setEvidenceFiles(evidenceData)
+      setLinkedOsint(linkedData)
       if (siteData) setEditForm(siteData)
+
+      // Load outgoing links for each own OSINT entry
+      const linksMap = new Map<string, OsintLink[]>()
+      for (const entry of osintData) {
+        const entryLinks = await window.electronAPI.osintLinks.list({ osint_entry_id: entry.id })
+        if (entryLinks.length > 0) linksMap.set(entry.id, entryLinks)
+      }
+      setOsintLinks(linksMap)
     } catch (err) {
       console.error('Failed to load site:', err)
     } finally {
@@ -243,11 +255,69 @@ export default function SiteDetailPage() {
           ) : (
             <div className="space-y-3">
               {osintEntries.map(entry => (
-                <OsintEntryCard key={entry.id} entry={entry} onDelete={async () => {
-                  await deleteOsintAndSync(entry.id, 'site', id)
-                  loadData()
-                }} />
+                <OsintEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  links={osintLinks.get(entry.id) || []}
+                  onDelete={async () => {
+                    await deleteOsintAndSync(entry.id, 'site', id)
+                    loadData()
+                  }}
+                  onUnlink={async (linkId: string) => {
+                    await window.electronAPI.osintLinks.delete(linkId)
+                    loadData()
+                  }}
+                  navigate={navigate}
+                />
               ))}
+            </div>
+          )}
+
+          {/* 역방향: 다른 엔티티에서 연결된 OSINT */}
+          {linkedOsint.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-medium text-dark-300 flex items-center gap-2 mb-3">
+                🔗 다른 엔티티에서 연결된 정보
+                <span className="text-[10px] bg-dark-800 px-1.5 py-0.5 rounded-full">{linkedOsint.length}</span>
+              </h3>
+              <div className="space-y-3">
+                {linkedOsint.map(item => {
+                  const cat = OSINT_CATEGORIES.find(c => c.value === item.entry.category)
+                  return (
+                    <div key={item.id} className="card border-l-2 border-l-blue-500/40">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">{cat?.icon || '📝'}</span>
+                          <h4 className="text-sm font-medium text-dark-100">{item.entry.title}</h4>
+                          <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">{cat?.label || item.entry.category || '기타'}</span>
+                          <button
+                            className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded hover:bg-blue-500/20 transition-colors"
+                            onClick={() => navigate(`/${item.source_type === 'site' ? 'sites' : 'persons'}/${item.source_id}`)}
+                          >
+                            from: {item.source_name}
+                          </button>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await window.electronAPI.osintLinks.delete(item.id)
+                            loadData()
+                          }}
+                          className="text-[10px] text-dark-600 hover:text-red-400 transition-colors px-2 py-0.5 rounded hover:bg-red-500/10"
+                          title="연결 해제"
+                        >
+                          연결 해제
+                        </button>
+                      </div>
+                      {item.entry.content && <p className="text-sm text-dark-300 mt-2 whitespace-pre-wrap">{item.entry.content}</p>}
+                      <div className="flex items-center gap-3 mt-2 text-[10px] text-dark-500">
+                        {item.entry.source && <span>출처: {item.entry.source}</span>}
+                        <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === item.entry.confidence)?.label || item.entry.confidence}</span>
+                        <span>{new Date(item.entry.created_at).toLocaleDateString('ko-KR')}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -376,8 +446,12 @@ function InfoCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-function OsintEntryCard({ entry, onDelete }: { entry: OsintEntry; onDelete: () => void }) {
+function OsintEntryCard({ entry, links, onDelete, onUnlink, navigate }: {
+  entry: OsintEntry; links: OsintLink[]; onDelete: () => void; onUnlink: (linkId: string) => void; navigate: (path: string) => void
+}) {
   const cat = OSINT_CATEGORIES.find(c => c.value === entry.category)
+  const [showLinks, setShowLinks] = useState(false)
+
   return (
     <div className="card">
       <div className="flex items-start justify-between">
@@ -386,6 +460,15 @@ function OsintEntryCard({ entry, onDelete }: { entry: OsintEntry; onDelete: () =
           <h4 className="text-sm font-medium text-dark-100">{entry.title}</h4>
           <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">{cat?.label || entry.category || '기타'}</span>
           {entry.is_key_evidence ? <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">핵심 증거</span> : null}
+          {links.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLinks(!showLinks) }}
+              className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+              title="연결된 대상 보기"
+            >
+              🔗 {links.length}
+            </button>
+          )}
         </div>
         <button onClick={(e) => { e.stopPropagation(); onDelete() }} className="text-dark-600 hover:text-red-400 text-xs">삭제</button>
       </div>
@@ -395,6 +478,33 @@ function OsintEntryCard({ entry, onDelete }: { entry: OsintEntry; onDelete: () =
         <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === entry.confidence)?.label || entry.confidence}</span>
         <span>{new Date(entry.created_at).toLocaleDateString('ko-KR')}</span>
       </div>
+
+      {/* 연결 대상 팝오버 */}
+      {showLinks && links.length > 0 && (
+        <div className="mt-3 p-3 bg-dark-800/40 border border-dark-700/30 rounded-lg">
+          <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">연결된 대상</p>
+          <div className="space-y-1.5">
+            {links.map(link => (
+              <div key={link.id} className="flex items-center justify-between">
+                <button
+                  className="flex items-center gap-2 text-sm text-dark-300 hover:text-dark-100 transition-colors"
+                  onClick={() => navigate(`/${link.target_type === 'site' ? 'sites' : 'persons'}/${link.target_id}`)}
+                >
+                  <span className="text-xs">{link.target_type === 'site' ? '🌐' : '👤'}</span>
+                  <span>{link.target_name || '알 수 없음'}</span>
+                </button>
+                <button
+                  onClick={() => onUnlink(link.id)}
+                  className="text-[10px] text-dark-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-500/10"
+                  title="연결 해제"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -582,14 +692,61 @@ export function AddOsintModal({ entityType, entityId, onClose, onCreated }: {
   const [isKeyEvidence, setIsKeyEvidence] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // === Phase 7: 연결 대상 선택 ===
+  const [showLinkSection, setShowLinkSection] = useState(false)
+  const [suggestions, setSuggestions] = useState<{ type: 'site' | 'person'; id: string; name: string; role?: string }[]>([])
+  const [allSites, setAllSites] = useState<{ id: string; name: string }[]>([])
+  const [allPersons, setAllPersons] = useState<{ id: string; name: string }[]>([])
+  const [selectedTargets, setSelectedTargets] = useState<Set<string>>(new Set()) // "type:id" keys
+
+  useEffect(() => {
+    loadLinkData()
+  }, [])
+
+  async function loadLinkData() {
+    try {
+      const [suggestData, sitesData, personsData] = await Promise.all([
+        window.electronAPI.osintLinks.suggestTargets(entityType, entityId),
+        window.electronAPI.sites.list(),
+        window.electronAPI.persons.list(),
+      ])
+      setSuggestions(suggestData)
+      // Exclude current entity from lists
+      setAllSites(sitesData.filter(s => !(entityType === 'site' && s.id === entityId)).map(s => ({ id: s.id, name: s.display_name || s.domain })))
+      setAllPersons(personsData.filter(p => !(entityType === 'person' && p.id === entityId)).map(p => ({ id: p.id, name: p.alias || p.real_name || '미확인' })))
+    } catch (err) {
+      console.error('Failed to load link data:', err)
+    }
+  }
+
+  function toggleTarget(type: 'site' | 'person', id: string) {
+    const key = `${type}:${id}`
+    setSelectedTargets(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function isSelected(type: 'site' | 'person', id: string) {
+    return selectedTargets.has(`${type}:${id}`)
+  }
+
+  // Filter out suggestions from "전체" lists to avoid duplicates
+  const suggestedIds = new Set(suggestions.map(s => `${s.type}:${s.id}`))
+  const filteredSites = allSites.filter(s => !suggestedIds.has(`site:${s.id}`))
+  const filteredPersons = allPersons.filter(p => !suggestedIds.has(`person:${p.id}`))
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!title.trim()) return
 
     setSaving(true)
     try {
+      const newEntryId = uuidv4()
       await createOsintAndSync({
-        id: uuidv4(),
+        id: newEntryId,
         entity_type: entityType,
         entity_id: entityId,
         category,
@@ -600,6 +757,20 @@ export function AddOsintModal({ entityType, entityId, onClose, onCreated }: {
         confidence,
         is_key_evidence: isKeyEvidence ? 1 : 0,
       })
+
+      // Create OsintLinks for selected targets
+      for (const key of selectedTargets) {
+        const [targetType, targetId] = key.split(':') as ['site' | 'person', string]
+        await window.electronAPI.osintLinks.create({
+          id: uuidv4(),
+          osint_entry_id: newEntryId,
+          source_type: entityType,
+          source_id: entityId,
+          target_type: targetType,
+          target_id: targetId,
+        })
+      }
+
       onCreated()
     } catch (err) {
       console.error('Failed to create OSINT entry:', err)
@@ -654,10 +825,121 @@ export function AddOsintModal({ entityType, entityId, onClose, onCreated }: {
             <input type="checkbox" checked={isKeyEvidence} onChange={e => setIsKeyEvidence(e.target.checked)} className="rounded border-dark-600 bg-dark-800" />
             <span className="text-sm text-dark-300">핵심 증거로 표시</span>
           </label>
+
+          {/* === 연결 대상 선택 섹션 === */}
+          <div className="border-t border-dark-700/40 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowLinkSection(!showLinkSection)}
+              className="flex items-center gap-2 text-sm font-medium text-dark-300 hover:text-dark-100 transition-colors w-full"
+            >
+              <span className={`text-xs transition-transform ${showLinkSection ? 'rotate-90' : ''}`}>▶</span>
+              🔗 연결 대상 선택
+              {selectedTargets.size > 0 && (
+                <span className="text-[10px] bg-yeye-600/20 text-yeye-400 px-1.5 py-0.5 rounded-full">{selectedTargets.size}개 선택</span>
+              )}
+              <span className="text-[10px] text-dark-600 ml-auto">선택사항</span>
+            </button>
+
+            {showLinkSection && (
+              <div className="mt-3 space-y-3">
+                {/* 추천 대상 (관계 기반) */}
+                {suggestions.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">
+                      💡 추천 (관계 기반)
+                    </p>
+                    <div className="space-y-1.5">
+                      {suggestions.map(s => (
+                        <label
+                          key={`${s.type}:${s.id}`}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-all ${
+                            isSelected(s.type, s.id) ? 'bg-yeye-600/15 border border-yeye-500/30' : 'bg-dark-800/40 border border-dark-700/30 hover:bg-dark-800/60'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected(s.type, s.id)}
+                            onChange={() => toggleTarget(s.type, s.id)}
+                            className="rounded border-dark-600 bg-dark-800 text-yeye-500"
+                          />
+                          <span className="text-xs">{s.type === 'site' ? '🌐' : '👤'}</span>
+                          <span className="text-sm text-dark-200">{s.name}</span>
+                          {s.role && (
+                            <span className="text-[10px] text-dark-500 bg-dark-900/60 px-1.5 py-0.5 rounded">{s.role}</span>
+                          )}
+                          <span className="text-[9px] text-yeye-500/60 ml-auto">추천</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 전체 사이트 */}
+                {filteredSites.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">
+                      🌐 전체 사이트
+                    </p>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {filteredSites.map(s => (
+                        <label
+                          key={`site:${s.id}`}
+                          className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                            isSelected('site', s.id) ? 'bg-yeye-600/15 border border-yeye-500/30' : 'bg-dark-800/30 border border-transparent hover:bg-dark-800/50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected('site', s.id)}
+                            onChange={() => toggleTarget('site', s.id)}
+                            className="rounded border-dark-600 bg-dark-800 text-yeye-500"
+                          />
+                          <span className="text-sm text-dark-300">{s.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 전체 인물 */}
+                {filteredPersons.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">
+                      👤 전체 인물
+                    </p>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {filteredPersons.map(p => (
+                        <label
+                          key={`person:${p.id}`}
+                          className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                            isSelected('person', p.id) ? 'bg-yeye-600/15 border border-yeye-500/30' : 'bg-dark-800/30 border border-transparent hover:bg-dark-800/50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected('person', p.id)}
+                            onChange={() => toggleTarget('person', p.id)}
+                            className="rounded border-dark-600 bg-dark-800 text-yeye-500"
+                          />
+                          <span className="text-sm text-dark-300">{p.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {suggestions.length === 0 && filteredSites.length === 0 && filteredPersons.length === 0 && (
+                  <p className="text-xs text-dark-600 italic py-2">연결할 수 있는 대상이 없습니다. 먼저 사이트나 인물을 추가하세요.</p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">취소</button>
             <button type="submit" disabled={!title.trim() || saving} className="btn-primary flex-1">
-              {saving ? '추가 중...' : '추가'}
+              {saving ? '추가 중...' : selectedTargets.size > 0 ? `추가 (${selectedTargets.size}개 연결)` : '추가'}
             </button>
           </div>
         </form>

@@ -3,7 +3,7 @@
  * Electron 환경이 아닐 때 (웹 브라우저에서 Vite dev server로 실행 시)
  * 메모리 기반 데이터로 동작하는 mock API
  */
-import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats, AiInsight, ObsidianConfig } from '@/shared/types'
+import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats, AiInsight, ObsidianConfig, OsintLink } from '@/shared/types'
 
 // In-memory data stores
 const stores = {
@@ -20,6 +20,7 @@ const stores = {
   siteGroupMembers: [] as { group_id: string; site_id: string; role: string; added_at: string }[],
   domainHistory: new Map<string, DomainHistory>(),
   aiInsights: new Map<string, AiInsight>(),
+  osintLinks: new Map<string, OsintLink>(),
 }
 
 function now() { return new Date().toISOString() }
@@ -554,6 +555,7 @@ export const mockElectronAPI: ElectronAPI = {
         siteGroups: Array.from(stores.siteGroups.values()),
         domainHistory: Array.from(stores.domainHistory.values()),
         aiInsights: Array.from(stores.aiInsights.values()),
+        osintLinks: Array.from(stores.osintLinks.values()),
       }
       const json = JSON.stringify(data, null, 2)
       const fileName = `y-eye-backup-${new Date().toISOString().split('T')[0]}.json`
@@ -599,6 +601,9 @@ export const mockElectronAPI: ElectronAPI = {
         if (data.aiInsights) {
           data.aiInsights.forEach((i: any) => stores.aiInsights.set(i.id, i))
         }
+        if (data.osintLinks) {
+          data.osintLinks.forEach((l: any) => stores.osintLinks.set(l.id, l))
+        }
 
         console.log('[Mock] Data imported:', counts)
         return { success: true, counts }
@@ -621,6 +626,7 @@ export const mockElectronAPI: ElectronAPI = {
       stores.siteGroupMembers = []
       stores.domainHistory.clear()
       stores.aiInsights.clear()
+      stores.osintLinks.clear()
       console.log('[Mock] All data reset')
       return { success: true }
     },
@@ -903,6 +909,96 @@ export const mockElectronAPI: ElectronAPI = {
       insight.reviewed_at = now()
       stores.aiInsights.set(id, insight)
       return { success: true }
+    },
+  },
+
+  osintLinks: {
+    list: async (filters: any) => {
+      let results = Array.from(stores.osintLinks.values())
+      if (filters.osint_entry_id) results = results.filter(l => l.osint_entry_id === filters.osint_entry_id)
+      if (filters.source_type && filters.source_id) {
+        results = results.filter(l => l.source_type === filters.source_type && l.source_id === filters.source_id)
+      }
+      if (filters.target_type && filters.target_id) {
+        results = results.filter(l => l.target_type === filters.target_type && l.target_id === filters.target_id)
+      }
+      // Enrich with names
+      return results.map(l => {
+        const entry = stores.osintEntries.get(l.osint_entry_id)
+        let target_name = ''
+        if (l.target_type === 'site') {
+          const s = stores.sites.get(l.target_id)
+          target_name = s?.display_name || s?.domain || '알 수 없음'
+        } else {
+          const p = stores.persons.get(l.target_id)
+          target_name = p?.alias || p?.real_name || '미확인'
+        }
+        let source_name = ''
+        if (l.source_type === 'site') {
+          const s = stores.sites.get(l.source_id)
+          source_name = s?.display_name || s?.domain || '알 수 없음'
+        } else {
+          const p = stores.persons.get(l.source_id)
+          source_name = p?.alias || p?.real_name || '미확인'
+        }
+        return { ...l, target_name, source_name, osint_title: entry?.title, osint_category: entry?.category || undefined }
+      })
+    },
+    create: async (link: Partial<OsintLink>) => {
+      const newLink: OsintLink = {
+        id: link.id || crypto.randomUUID(),
+        osint_entry_id: link.osint_entry_id!,
+        source_type: link.source_type!,
+        source_id: link.source_id!,
+        target_type: link.target_type!,
+        target_id: link.target_id!,
+        created_at: now(),
+      }
+      stores.osintLinks.set(newLink.id, newLink)
+      return newLink
+    },
+    delete: async (id: string) => {
+      stores.osintLinks.delete(id)
+      return { success: true }
+    },
+    listLinkedTo: async (targetType: 'site' | 'person', targetId: string) => {
+      const links = Array.from(stores.osintLinks.values())
+        .filter(l => l.target_type === targetType && l.target_id === targetId)
+      return links.map(l => {
+        const entry = stores.osintEntries.get(l.osint_entry_id)!
+        let source_name = ''
+        if (l.source_type === 'site') {
+          const s = stores.sites.get(l.source_id)
+          source_name = s?.display_name || s?.domain || '알 수 없음'
+        } else {
+          const p = stores.persons.get(l.source_id)
+          source_name = p?.alias || p?.real_name || '미확인'
+        }
+        return { ...l, entry, source_name }
+      }).filter(l => l.entry) // filter out links to deleted entries
+    },
+    suggestTargets: async (entityType: 'site' | 'person', entityId: string) => {
+      const suggestions: { type: 'site' | 'person'; id: string; name: string; role?: string }[] = []
+      if (entityType === 'site') {
+        // Suggest related persons via personSiteRelations
+        const rels = Array.from(stores.personSiteRelations.values()).filter(r => r.site_id === entityId)
+        for (const rel of rels) {
+          const person = stores.persons.get(rel.person_id)
+          if (person) {
+            suggestions.push({ type: 'person', id: person.id, name: person.alias || person.real_name || '미확인', role: rel.role || undefined })
+          }
+        }
+      } else {
+        // Suggest related sites via personSiteRelations
+        const rels = Array.from(stores.personSiteRelations.values()).filter(r => r.person_id === entityId)
+        for (const rel of rels) {
+          const site = stores.sites.get(rel.site_id)
+          if (site) {
+            suggestions.push({ type: 'site', id: site.id, name: site.display_name || site.domain, role: rel.role || undefined })
+          }
+        }
+      }
+      return suggestions
     },
   },
 }

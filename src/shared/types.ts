@@ -109,6 +109,21 @@ export interface TimelineEvent {
   created_at: string
 }
 
+export interface OsintLink {
+  id: string
+  osint_entry_id: string
+  source_type: 'site' | 'person'
+  source_id: string
+  target_type: 'site' | 'person'
+  target_id: string
+  created_at: string
+  // Joined fields for display
+  target_name?: string
+  source_name?: string
+  osint_title?: string
+  osint_category?: string
+}
+
 export interface AiInsight {
   id: string
   insight_type: string
@@ -342,6 +357,15 @@ export interface ElectronAPI {
     list: (filters?: { entity_type?: string; entity_id?: string; status?: string }) => Promise<AiInsight[]>
     analyze: (entityType: 'site' | 'person', entityId: string) => Promise<AiInsight[]>
     updateStatus: (id: string, status: 'confirmed' | 'dismissed' | 'reviewed') => Promise<{ success: boolean }>
+  }
+  osintLinks: {
+    list: (filters: { osint_entry_id?: string; source_type?: string; source_id?: string; target_type?: string; target_id?: string }) => Promise<OsintLink[]>
+    create: (link: Partial<OsintLink>) => Promise<OsintLink>
+    delete: (id: string) => Promise<{ success: boolean }>
+    /** 특정 엔티티에 연결된(target으로 지정된) OSINT 목록 — 역방향 조회 */
+    listLinkedTo: (targetType: 'site' | 'person', targetId: string) => Promise<(OsintLink & { entry: OsintEntry })[]>
+    /** 특정 OSINT 항목에 추천 대상 반환 (관계 기반) */
+    suggestTargets: (entityType: 'site' | 'person', entityId: string) => Promise<{ type: 'site' | 'person'; id: string; name: string; role?: string }[]>
   }
 }
 

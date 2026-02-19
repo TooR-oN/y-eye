@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Person, OsintEntry, PersonSiteRelation, PersonRelation, MarkdownExportResult, EvidenceFile } from '@/shared/types'
+import type { Person, OsintEntry, PersonSiteRelation, PersonRelation, MarkdownExportResult, EvidenceFile, OsintLink } from '@/shared/types'
 import { OSINT_CATEGORIES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 import { AddOsintModal } from './SiteDetailPage'
 import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
@@ -20,6 +20,8 @@ export default function PersonDetailPage() {
   const [relatedSites, setRelatedSites] = useState<PersonSiteRelation[]>([])
   const [personRelations, setPersonRelations] = useState<PersonRelation[]>([])
   const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
+  const [linkedOsint, setLinkedOsint] = useState<(OsintLink & { entry: OsintEntry })[]>([])
+  const [osintLinks, setOsintLinks] = useState<Map<string, OsintLink[]>>(new Map())
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'sites' | 'relations'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
@@ -31,19 +33,29 @@ export default function PersonDetailPage() {
   const loadData = useCallback(async () => {
     if (!id) return
     try {
-      const [personData, osintData, sitesData, relationsData, evidenceData] = await Promise.all([
+      const [personData, osintData, sitesData, relationsData, evidenceData, linkedData] = await Promise.all([
         window.electronAPI.persons.get(id),
         window.electronAPI.osint.list({ entity_type: 'person', entity_id: id }),
         window.electronAPI.personSiteRelations.list({ person_id: id }),
         window.electronAPI.personRelations.list(id),
         window.electronAPI.evidence.list({ entity_type: 'person', entity_id: id }),
+        window.electronAPI.osintLinks.listLinkedTo('person', id),
       ])
       setPerson(personData)
       setOsintEntries(osintData)
       setRelatedSites(sitesData)
       setPersonRelations(relationsData)
       setEvidenceFiles(evidenceData)
+      setLinkedOsint(linkedData)
       if (personData) setEditForm(personData)
+
+      // Load outgoing links for each own OSINT entry
+      const linksMap = new Map<string, OsintLink[]>()
+      for (const entry of osintData) {
+        const entryLinks = await window.electronAPI.osintLinks.list({ osint_entry_id: entry.id })
+        if (entryLinks.length > 0) linksMap.set(entry.id, entryLinks)
+      }
+      setOsintLinks(linksMap)
     } catch (err) {
       console.error('Failed to load person:', err)
     } finally {
@@ -222,20 +234,64 @@ export default function PersonDetailPage() {
             <div className="space-y-3">
               {osintEntries.map(entry => {
                 const cat = OSINT_CATEGORIES.find(c => c.value === entry.category)
+                const entryLinks = osintLinks.get(entry.id) || []
                 return (
-                  <div key={entry.id} className="card">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm">{cat?.icon || '📝'}</span>
-                        <h4 className="text-sm font-medium text-dark-100">{entry.title}</h4>
-                        <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">{cat?.label || '기타'}</span>
-                      </div>
-                      <button onClick={async () => { await window.electronAPI.osint.delete(entry.id); loadData() }} className="text-dark-600 hover:text-red-400 text-xs">삭제</button>
-                    </div>
-                    {entry.content && <p className="text-sm text-dark-300 mt-2 whitespace-pre-wrap">{entry.content}</p>}
-                  </div>
+                  <PersonOsintCard
+                    key={entry.id}
+                    entry={entry}
+                    cat={cat}
+                    links={entryLinks}
+                    onDelete={async () => { await window.electronAPI.osint.delete(entry.id); loadData() }}
+                    onUnlink={async (linkId: string) => { await window.electronAPI.osintLinks.delete(linkId); loadData() }}
+                    navigate={navigate}
+                  />
                 )
               })}
+            </div>
+          )}
+
+          {/* 역방향: 다른 엔티티에서 연결된 OSINT */}
+          {linkedOsint.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-medium text-dark-300 flex items-center gap-2 mb-3">
+                🔗 다른 엔티티에서 연결된 정보
+                <span className="text-[10px] bg-dark-800 px-1.5 py-0.5 rounded-full">{linkedOsint.length}</span>
+              </h3>
+              <div className="space-y-3">
+                {linkedOsint.map(item => {
+                  const cat = OSINT_CATEGORIES.find(c => c.value === item.entry.category)
+                  return (
+                    <div key={item.id} className="card border-l-2 border-l-blue-500/40">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm">{cat?.icon || '📝'}</span>
+                          <h4 className="text-sm font-medium text-dark-100">{item.entry.title}</h4>
+                          <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">{cat?.label || item.entry.category || '기타'}</span>
+                          <button
+                            className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded hover:bg-blue-500/20 transition-colors"
+                            onClick={() => navigate(`/${item.source_type === 'site' ? 'sites' : 'persons'}/${item.source_id}`)}
+                          >
+                            from: {item.source_name}
+                          </button>
+                        </div>
+                        <button
+                          onClick={async () => { await window.electronAPI.osintLinks.delete(item.id); loadData() }}
+                          className="text-[10px] text-dark-600 hover:text-red-400 transition-colors px-2 py-0.5 rounded hover:bg-red-500/10"
+                          title="연결 해제"
+                        >
+                          연결 해제
+                        </button>
+                      </div>
+                      {item.entry.content && <p className="text-sm text-dark-300 mt-2 whitespace-pre-wrap">{item.entry.content}</p>}
+                      <div className="flex items-center gap-3 mt-2 text-[10px] text-dark-500">
+                        {item.entry.source && <span>출처: {item.entry.source}</span>}
+                        <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === item.entry.confidence)?.label || item.entry.confidence}</span>
+                        <span>{new Date(item.entry.created_at).toLocaleDateString('ko-KR')}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -315,6 +371,77 @@ export default function PersonDetailPage() {
       {/* Markdown Preview Modal */}
       {exportResult && (
         <MarkdownPreviewModal result={exportResult} onClose={() => setExportResult(null)} />
+      )}
+    </div>
+  )
+}
+
+// ============================================
+// PersonOsintCard — OSINT 카드 (연결 표시/해제)
+// ============================================
+
+function PersonOsintCard({ entry, cat, links, onDelete, onUnlink, navigate }: {
+  entry: OsintEntry
+  cat: { icon: string; label: string; value: string } | undefined
+  links: OsintLink[]
+  onDelete: () => void
+  onUnlink: (linkId: string) => void
+  navigate: (path: string) => void
+}) {
+  const [showLinks, setShowLinks] = useState(false)
+
+  return (
+    <div className="card">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{cat?.icon || '📝'}</span>
+          <h4 className="text-sm font-medium text-dark-100">{entry.title}</h4>
+          <span className="text-[10px] text-dark-500 bg-dark-800 px-1.5 py-0.5 rounded">{cat?.label || '기타'}</span>
+          {entry.is_key_evidence ? <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">핵심 증거</span> : null}
+          {links.length > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowLinks(!showLinks) }}
+              className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+              title="연결된 대상 보기"
+            >
+              🔗 {links.length}
+            </button>
+          )}
+        </div>
+        <button onClick={async () => onDelete()} className="text-dark-600 hover:text-red-400 text-xs">삭제</button>
+      </div>
+      {entry.content && <p className="text-sm text-dark-300 mt-2 whitespace-pre-wrap">{entry.content}</p>}
+      <div className="flex items-center gap-3 mt-2 text-[10px] text-dark-500">
+        {entry.source && <span>출처: {entry.source}</span>}
+        <span>신뢰도: {CONFIDENCE_LEVELS.find(c => c.value === entry.confidence)?.label || entry.confidence}</span>
+        <span>{new Date(entry.created_at).toLocaleDateString('ko-KR')}</span>
+      </div>
+
+      {/* 연결 대상 팝오버 */}
+      {showLinks && links.length > 0 && (
+        <div className="mt-3 p-3 bg-dark-800/40 border border-dark-700/30 rounded-lg">
+          <p className="text-[10px] font-medium text-dark-500 uppercase tracking-wider mb-2">연결된 대상</p>
+          <div className="space-y-1.5">
+            {links.map(link => (
+              <div key={link.id} className="flex items-center justify-between">
+                <button
+                  className="flex items-center gap-2 text-sm text-dark-300 hover:text-dark-100 transition-colors"
+                  onClick={() => navigate(`/${link.target_type === 'site' ? 'sites' : 'persons'}/${link.target_id}`)}
+                >
+                  <span className="text-xs">{link.target_type === 'site' ? '🌐' : '👤'}</span>
+                  <span>{link.target_name || '알 수 없음'}</span>
+                </button>
+                <button
+                  onClick={() => onUnlink(link.id)}
+                  className="text-[10px] text-dark-600 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-500/10"
+                  title="연결 해제"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
