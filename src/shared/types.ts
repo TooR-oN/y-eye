@@ -159,6 +159,26 @@ export interface DomainHistory {
   created_at: string
 }
 
+export interface ObsidianConfig {
+  vaultPath: string
+  sitesFolder: string
+  personsFolder: string
+  reportsFolder: string
+  domainChangesFolder: string
+  autoExport: boolean
+  includeTimeline: boolean
+  includeDomainHistory: boolean
+  includeRelatedEntities: boolean
+}
+
+export interface MarkdownExportResult {
+  success: boolean
+  filePath?: string
+  markdown: string
+  fileName: string
+  error?: string
+}
+
 export interface DashboardStats {
   totalSites: number
   activeSites: number
@@ -293,6 +313,11 @@ export interface ElectronAPI {
   }
   obsidian: {
     open: (vaultPath: string, filePath: string) => Promise<{ success: boolean }>
+    getConfig: () => Promise<ObsidianConfig>
+    saveConfig: (config: ObsidianConfig) => Promise<{ success: boolean }>
+    exportSite: (siteId: string) => Promise<MarkdownExportResult>
+    exportPerson: (personId: string) => Promise<MarkdownExportResult>
+    exportDomainChange: (siteId: string, oldDomain: string, newDomain: string) => Promise<MarkdownExportResult>
   }
   app: {
     info: () => Promise<{ version: string; name: string; platform: string; userData: string }>

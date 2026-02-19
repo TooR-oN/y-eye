@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
-import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory } from '@/shared/types'
+import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult } from '@/shared/types'
 import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
+import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
 
 export default function SiteDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -17,6 +18,8 @@ export default function SiteDetailPage() {
   const [showAddOsint, setShowAddOsint] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<Site>>({})
+  const [exporting, setExporting] = useState(false)
+  const [exportResult, setExportResult] = useState<MarkdownExportResult | null>(null)
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -65,6 +68,19 @@ export default function SiteDetailPage() {
     }
   }
 
+  async function handleExportMarkdown() {
+    if (!id) return
+    setExporting(true)
+    try {
+      const result = await window.electronAPI.obsidian.exportSite(id)
+      setExportResult(result)
+    } catch (err) {
+      console.error('Failed to export markdown:', err)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-8"><div className="animate-pulse h-8 w-64 bg-dark-800 rounded" /></div>
   }
@@ -110,6 +126,14 @@ export default function SiteDetailPage() {
               </>
             ) : (
               <>
+                <button
+                  onClick={handleExportMarkdown}
+                  disabled={exporting}
+                  className="btn-secondary btn-sm flex items-center gap-1"
+                  title="Obsidian 마크다운으로 내보내기"
+                >
+                  {exporting ? '⏳' : '📝'} 내보내기
+                </button>
                 <button onClick={() => setEditing(true)} className="btn-secondary btn-sm">편집</button>
                 <button onClick={handleDelete} className="btn-danger btn-sm">삭제</button>
               </>
@@ -265,7 +289,28 @@ export default function SiteDetailPage() {
 
       {activeTab === 'history' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-dark-300">도메인 변경 이력</h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-sm font-medium text-dark-300">도메인 변경 이력</h3>
+            {domainHistory.length >= 2 && (
+              <button
+                onClick={async () => {
+                  const sorted = [...domainHistory].sort((a, b) => (a.detected_at || a.created_at).localeCompare(b.detected_at || b.created_at))
+                  const oldDomain = sorted[0].domain
+                  const newDomain = sorted[sorted.length - 1].domain
+                  try {
+                    const result = await window.electronAPI.obsidian.exportDomainChange(id!, oldDomain, newDomain)
+                    setExportResult(result)
+                  } catch (err) {
+                    console.error('Failed to export domain change:', err)
+                  }
+                }}
+                className="btn-secondary btn-sm flex items-center gap-1 text-xs"
+                title="도메인 변경 노트 내보내기"
+              >
+                📝 변경 노트 내보내기
+              </button>
+            )}
+          </div>
           {domainHistory.length === 0 ? (
             <div className="card text-center py-8">
               <p className="text-dark-500 text-sm">도메인 변경 이력이 없습니다</p>
@@ -289,6 +334,11 @@ export default function SiteDetailPage() {
       {/* Add OSINT Modal */}
       {showAddOsint && id && (
         <AddOsintModal entityType="site" entityId={id} onClose={() => setShowAddOsint(false)} onCreated={() => { setShowAddOsint(false); loadData() }} />
+      )}
+
+      {/* Markdown Preview Modal */}
+      {exportResult && (
+        <MarkdownPreviewModal result={exportResult} onClose={() => setExportResult(null)} />
       )}
     </div>
   )

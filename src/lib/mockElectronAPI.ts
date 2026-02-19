@@ -3,7 +3,7 @@
  * Electron 환경이 아닐 때 (웹 브라우저에서 Vite dev server로 실행 시)
  * 메모리 기반 데이터로 동작하는 mock API
  */
-import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats, AiInsight } from '@/shared/types'
+import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats, AiInsight, ObsidianConfig } from '@/shared/types'
 
 // In-memory data stores
 const stores = {
@@ -321,6 +321,207 @@ export const mockElectronAPI: ElectronAPI = {
       console.log(`[Mock] Obsidian open: vault=${vaultPath}, file=${filePath}`)
       alert(`Obsidian 열기 (웹 프리뷰 모드)\nVault: ${vaultPath}\nFile: ${filePath}`)
       return { success: true }
+    },
+    getConfig: async (): Promise<ObsidianConfig> => {
+      const stored = localStorage.getItem('yeye_obsidian_config')
+      if (stored) return JSON.parse(stored)
+      return {
+        vaultPath: '',
+        sitesFolder: 'Sites',
+        personsFolder: 'Persons',
+        reportsFolder: 'Reports',
+        domainChangesFolder: 'Domain Changes',
+        autoExport: false,
+        includeTimeline: true,
+        includeDomainHistory: true,
+        includeRelatedEntities: true,
+      }
+    },
+    saveConfig: async (config: ObsidianConfig) => {
+      localStorage.setItem('yeye_obsidian_config', JSON.stringify(config))
+      console.log('[Mock] Obsidian config saved:', config)
+      return { success: true }
+    },
+    exportSite: async (siteId: string) => {
+      const site = stores.sites.get(siteId)
+      if (!site) return { success: false, markdown: '', fileName: '', error: 'Site not found' }
+
+      const osintEntries = Array.from(stores.osintEntries.values()).filter(o => o.entity_type === 'site' && o.entity_id === siteId)
+      const relations = Array.from(stores.personSiteRelations.values()).filter(r => r.site_id === siteId)
+      const timeline = Array.from(stores.timelineEvents.values()).filter(e => e.entity_type === 'site' && e.entity_id === siteId).sort((a, b) => b.event_date.localeCompare(a.event_date))
+      const domainHist = Array.from(stores.domainHistory.values()).filter(d => d.site_id === siteId).sort((a, b) => (b.detected_at || b.created_at).localeCompare(a.detected_at || a.created_at))
+
+      const PRIORITY_KR: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
+      const STATUS_KR: Record<string, string> = { active: '운영 중', closed: '폐쇄', redirected: '리다이렉트', unknown: '미확인' }
+      const INVEST_KR: Record<string, string> = { pending: '대기', in_progress: '진행중', completed: '완료', on_hold: '보류' }
+
+      let md = `---\ntype: site\ndomain: "${site.domain}"\nstatus: "${site.status}"\npriority: "${site.priority}"\ninvestigation: "${site.investigation_status}"\ncreated: "${site.created_at}"\nupdated: "${site.updated_at}"\ntags:\n  - y-eye\n  - site\n---\n\n`
+      md += `# 🌐 ${site.display_name || site.domain}\n\n`
+      md += `| 항목 | 값 |\n|------|----|\n`
+      md += `| 도메인 | \`${site.domain}\` |\n`
+      md += `| 유형 | ${site.site_type || '미분류'} |\n`
+      md += `| 상태 | ${STATUS_KR[site.status] || site.status} |\n`
+      md += `| 우선순위 | ${PRIORITY_KR[site.priority] || site.priority} |\n`
+      md += `| 조사 상태 | ${INVEST_KR[site.investigation_status] || site.investigation_status} |\n`
+      if (site.traffic_monthly) md += `| 월간 트래픽 | ${site.traffic_monthly} |\n`
+      if (site.traffic_rank) md += `| 글로벌 순위 | ${site.traffic_rank} |\n`
+      if (site.recommendation) md += `| 권고사항 | ${site.recommendation} |\n`
+      md += '\n'
+
+      if (site.notes) {
+        md += `## 📝 메모\n\n${site.notes}\n\n`
+      }
+
+      // OSINT
+      if (osintEntries.length > 0) {
+        md += `## 🔍 인프라 정보 (${osintEntries.length}건)\n\n`
+        for (const entry of osintEntries) {
+          md += `### ${entry.title}\n\n`
+          md += `- **카테고리**: ${entry.category || '기타'}\n`
+          md += `- **신뢰도**: ${entry.confidence}\n`
+          if (entry.source) md += `- **출처**: ${entry.source}\n`
+          if (entry.is_key_evidence) md += `- **⭐ 핵심 증거**\n`
+          if (entry.content) md += `\n${entry.content}\n`
+          md += '\n'
+        }
+      }
+
+      // Related Persons
+      if (relations.length > 0) {
+        md += `## 👤 연관 인물 (${relations.length}명)\n\n`
+        for (const rel of relations) {
+          const person = stores.persons.get(rel.person_id)
+          md += `- **[[${person?.alias || person?.real_name || '미확인'}]]** — 역할: ${rel.role || '미지정'}, 신뢰도: ${rel.confidence}\n`
+          if (rel.evidence) md += `  - 근거: ${rel.evidence}\n`
+        }
+        md += '\n'
+      }
+
+      // Timeline
+      if (timeline.length > 0) {
+        md += `## 📅 타임라인 (${timeline.length}건)\n\n`
+        for (const evt of timeline) {
+          const date = new Date(evt.event_date).toLocaleDateString('ko-KR')
+          md += `- **${date}** — ${evt.title}\n`
+          if (evt.description) md += `  - ${evt.description}\n`
+        }
+        md += '\n'
+      }
+
+      // Domain History
+      if (domainHist.length > 0) {
+        md += `## 🔄 도메인 변경 이력 (${domainHist.length}건)\n\n`
+        for (const h of domainHist) {
+          const date = h.detected_at ? new Date(h.detected_at).toLocaleDateString('ko-KR') : '-'
+          md += `- **${date}** — \`${h.domain}\` (${h.status || '-'})\n`
+          if (h.notes) md += `  - ${h.notes}\n`
+        }
+        md += '\n'
+      }
+
+      md += `---\n*Y-EYE에서 자동 생성 — ${new Date().toLocaleString('ko-KR')}*\n`
+
+      const fileName = `${site.domain}.md`
+      console.log(`[Mock] Export site markdown: ${fileName} (${md.length} chars)`)
+      return { success: true, markdown: md, fileName, filePath: `Sites/${fileName}` }
+    },
+    exportPerson: async (personId: string) => {
+      const person = stores.persons.get(personId)
+      if (!person) return { success: false, markdown: '', fileName: '', error: 'Person not found' }
+
+      const osintEntries = Array.from(stores.osintEntries.values()).filter(o => o.entity_type === 'person' && o.entity_id === personId)
+      const siteRelations = Array.from(stores.personSiteRelations.values()).filter(r => r.person_id === personId)
+      const personRelations = Array.from(stores.personRelations.values()).filter(r => r.person_a_id === personId || r.person_b_id === personId)
+
+      const RISK_KR: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
+      const STATUS_KR: Record<string, string> = { active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인' }
+
+      let md = `---\ntype: person\nalias: "${person.alias || ''}"\nreal_name: "${person.real_name || ''}"\nrisk_level: "${person.risk_level}"\nstatus: "${person.status}"\ncreated: "${person.created_at}"\nupdated: "${person.updated_at}"\ntags:\n  - y-eye\n  - person\n---\n\n`
+      md += `# 👤 ${person.alias || person.real_name || '미확인'}\n\n`
+      md += `| 항목 | 값 |\n|------|----|\n`
+      if (person.alias) md += `| 별칭 | ${person.alias} |\n`
+      if (person.real_name) md += `| 실명 | ${person.real_name} |\n`
+      md += `| 위험도 | ${RISK_KR[person.risk_level] || person.risk_level} |\n`
+      md += `| 상태 | ${STATUS_KR[person.status] || person.status} |\n`
+      md += '\n'
+
+      if (person.description) {
+        md += `## 📝 설명\n\n${person.description}\n\n`
+      }
+
+      // OSINT
+      if (osintEntries.length > 0) {
+        md += `## 🔍 수집 정보 (${osintEntries.length}건)\n\n`
+        for (const entry of osintEntries) {
+          md += `### ${entry.title}\n\n`
+          md += `- **카테고리**: ${entry.category || '기타'}\n`
+          md += `- **신뢰도**: ${entry.confidence}\n`
+          if (entry.source) md += `- **출처**: ${entry.source}\n`
+          if (entry.is_key_evidence) md += `- **⭐ 핵심 증거**\n`
+          if (entry.content) md += `\n${entry.content}\n`
+          md += '\n'
+        }
+      }
+
+      // Related Sites
+      if (siteRelations.length > 0) {
+        md += `## 🌐 관련 사이트 (${siteRelations.length}개)\n\n`
+        for (const rel of siteRelations) {
+          const site = stores.sites.get(rel.site_id)
+          md += `- **[[${site?.domain || '알 수 없음'}]]** — 역할: ${rel.role || '미지정'}, 신뢰도: ${rel.confidence}\n`
+          if (rel.evidence) md += `  - 근거: ${rel.evidence}\n`
+        }
+        md += '\n'
+      }
+
+      // Person Relations
+      if (personRelations.length > 0) {
+        md += `## 🤝 인물 관계 (${personRelations.length}건)\n\n`
+        for (const rel of personRelations) {
+          const isA = rel.person_a_id === personId
+          const other = stores.persons.get(isA ? rel.person_b_id : rel.person_a_id)
+          md += `- **[[${other?.alias || other?.real_name || '미확인'}]]** — 관계: ${rel.relation_type || '미지정'}, 신뢰도: ${rel.confidence}\n`
+          if (rel.evidence) md += `  - 근거: ${rel.evidence}\n`
+        }
+        md += '\n'
+      }
+
+      md += `---\n*Y-EYE에서 자동 생성 — ${new Date().toLocaleString('ko-KR')}*\n`
+
+      const name = person.alias || person.real_name || personId
+      const fileName = `${name}.md`
+      console.log(`[Mock] Export person markdown: ${fileName} (${md.length} chars)`)
+      return { success: true, markdown: md, fileName, filePath: `Persons/${fileName}` }
+    },
+    exportDomainChange: async (siteId: string, oldDomain: string, newDomain: string) => {
+      const site = stores.sites.get(siteId)
+      const domainHist = Array.from(stores.domainHistory.values()).filter(d => d.site_id === siteId).sort((a, b) => (a.detected_at || a.created_at).localeCompare(b.detected_at || b.created_at))
+
+      let md = `---\ntype: domain_change\nsite_id: "${siteId}"\nold_domain: "${oldDomain}"\nnew_domain: "${newDomain}"\ndetected: "${now()}"\ntags:\n  - y-eye\n  - domain-change\n---\n\n`
+      md += `# 🔄 도메인 변경: ${oldDomain} → ${newDomain}\n\n`
+      md += `| 항목 | 값 |\n|------|----|\n`
+      md += `| 사이트 | [[${site?.domain || newDomain}]] |\n`
+      md += `| 이전 도메인 | \`${oldDomain}\` |\n`
+      md += `| 새 도메인 | \`${newDomain}\` |\n`
+      md += `| 감지일 | ${new Date().toLocaleDateString('ko-KR')} |\n`
+      md += '\n'
+
+      if (domainHist.length > 0) {
+        md += `## 📜 전체 도메인 이력\n\n`
+        for (const h of domainHist) {
+          const date = h.detected_at ? new Date(h.detected_at).toLocaleDateString('ko-KR') : '-'
+          md += `- **${date}** — \`${h.domain}\` (${h.status || '-'})\n`
+          if (h.notes) md += `  - ${h.notes}\n`
+        }
+        md += '\n'
+      }
+
+      md += `## 📝 분석 노트\n\n> 도메인 변경의 원인과 영향을 여기에 기록하세요.\n\n`
+      md += `---\n*Y-EYE에서 자동 생성 — ${new Date().toLocaleString('ko-KR')}*\n`
+
+      const fileName = `${oldDomain}→${newDomain}.md`
+      console.log(`[Mock] Export domain change: ${fileName}`)
+      return { success: true, markdown: md, fileName, filePath: `Domain Changes/${fileName}` }
     },
   },
 

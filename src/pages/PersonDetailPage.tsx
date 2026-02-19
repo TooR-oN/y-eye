@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Person, OsintEntry, PersonSiteRelation, PersonRelation } from '@/shared/types'
+import type { Person, OsintEntry, PersonSiteRelation, PersonRelation, MarkdownExportResult } from '@/shared/types'
 import { OSINT_CATEGORIES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 import { AddOsintModal } from './SiteDetailPage'
+import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
 
 const RISK_LABELS: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
 const STATUS_LABELS: Record<string, string> = { active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인' }
@@ -20,6 +21,8 @@ export default function PersonDetailPage() {
   const [showAddOsint, setShowAddOsint] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<Person>>({})
+  const [exporting, setExporting] = useState(false)
+  const [exportResult, setExportResult] = useState<MarkdownExportResult | null>(null)
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -66,6 +69,19 @@ export default function PersonDetailPage() {
     }
   }
 
+  async function handleExportMarkdown() {
+    if (!id) return
+    setExporting(true)
+    try {
+      const result = await window.electronAPI.obsidian.exportPerson(id)
+      setExportResult(result)
+    } catch (err) {
+      console.error('Failed to export markdown:', err)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (loading) return <div className="p-8"><div className="animate-pulse h-8 w-64 bg-dark-800 rounded" /></div>
   if (!person) return <div className="p-8"><p className="text-dark-500">인물을 찾을 수 없습니다.</p></div>
 
@@ -106,6 +122,14 @@ export default function PersonDetailPage() {
               </>
             ) : (
               <>
+                <button
+                  onClick={handleExportMarkdown}
+                  disabled={exporting}
+                  className="btn-secondary btn-sm flex items-center gap-1"
+                  title="Obsidian 마크다운으로 내보내기"
+                >
+                  {exporting ? '⏳' : '📝'} 내보내기
+                </button>
                 <button onClick={() => setEditing(true)} className="btn-secondary btn-sm">편집</button>
                 <button onClick={handleDelete} className="btn-danger btn-sm">삭제</button>
               </>
@@ -267,6 +291,11 @@ export default function PersonDetailPage() {
       {/* Add OSINT Modal */}
       {showAddOsint && id && (
         <AddOsintModal entityType="person" entityId={id} onClose={() => setShowAddOsint(false)} onCreated={() => { setShowAddOsint(false); loadData() }} />
+      )}
+
+      {/* Markdown Preview Modal */}
+      {exportResult && (
+        <MarkdownPreviewModal result={exportResult} onClose={() => setExportResult(null)} />
       )}
     </div>
   )
