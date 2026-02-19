@@ -91,4 +91,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     info: () => ipcRenderer.invoke('app:info'),
   },
+
+  // Jobdori
+  jobdori: {
+    connect: (databaseUrl?: string) => ipcRenderer.invoke('jobdori:connect', databaseUrl),
+    status: () => ipcRenderer.invoke('jobdori:status'),
+    disconnect: () => ipcRenderer.invoke('jobdori:disconnect'),
+    sync: (options?: any) => ipcRenderer.invoke('jobdori:sync', options),
+    syncHistory: (limit?: number) => ipcRenderer.invoke('jobdori:sync-history', limit),
+    search: (searchTerm: string) => ipcRenderer.invoke('jobdori:search', searchTerm),
+    sitesByRecommendation: (recommendation?: string) => ipcRenderer.invoke('jobdori:sites-by-recommendation', recommendation),
+    envPath: () => ipcRenderer.invoke('jobdori:env-path'),
+  },
 })

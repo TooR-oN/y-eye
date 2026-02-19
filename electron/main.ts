@@ -1,6 +1,15 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { initDatabase, getDatabase } from './database'
+import {
+  initJobdoriConnection,
+  closeJobdoriConnection,
+  testConnection as testJobdoriConnection,
+  isConnected as isJobdoriConnected,
+  fetchSitesByRecommendation,
+} from './jobdoriDB'
+import { runSync, searchJobdoriSites, getSyncHistory } from './syncEngine'
 
 // Fix path for production
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
@@ -447,5 +456,105 @@ function registerIpcHandlers() {
       platform: process.platform,
       userData: app.getPath('userData'),
     }
+  })
+
+  // ============================================
+  // Jobdori Integration
+  // ============================================
+
+  // .env 파일에서 DATABASE_URL 읽기
+  function loadEnvFile(): Record<string, string> {
+    const envPath = path.join(app.getPath('userData'), '.env')
+    const env: Record<string, string> = {}
+    try {
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, 'utf-8')
+        for (const line of content.split('\n')) {
+          const trimmed = line.trim()
+          if (!trimmed || trimmed.startsWith('#')) continue
+          const eqIdx = trimmed.indexOf('=')
+          if (eqIdx > 0) {
+            env[trimmed.substring(0, eqIdx).trim()] = trimmed.substring(eqIdx + 1).trim()
+          }
+        }
+      }
+    } catch (_) {}
+    return env
+  }
+
+  // Jobdori DB 연결
+  ipcMain.handle('jobdori:connect', async (_event, databaseUrl?: string) => {
+    try {
+      let url = databaseUrl
+      if (!url) {
+        const env = loadEnvFile()
+        url = env.DATABASE_URL
+      }
+      if (!url) return { success: false, message: 'DATABASE_URL이 설정되지 않았습니다.' }
+
+      initJobdoriConnection(url)
+      const result = await testJobdoriConnection()
+
+      // 성공 시 .env에 저장
+      if (result.success && databaseUrl) {
+        const envPath = path.join(app.getPath('userData'), '.env')
+        fs.writeFileSync(envPath, `DATABASE_URL=${databaseUrl}\n`, 'utf-8')
+      }
+
+      return result
+    } catch (err: any) {
+      return { success: false, message: err.message }
+    }
+  })
+
+  // Jobdori DB 연결 상태 확인
+  ipcMain.handle('jobdori:status', () => {
+    return { connected: isJobdoriConnected() }
+  })
+
+  // Jobdori DB 연결 해제
+  ipcMain.handle('jobdori:disconnect', async () => {
+    await closeJobdoriConnection()
+    return { success: true }
+  })
+
+  // 동기화 실행
+  ipcMain.handle('jobdori:sync', async (_event, options?: any) => {
+    try {
+      const result = await runSync(options)
+      return result
+    } catch (err: any) {
+      return { success: false, errors: [err.message] }
+    }
+  })
+
+  // 동기화 이력 조회
+  ipcMain.handle('jobdori:sync-history', (_event, limit?: number) => {
+    return getSyncHistory(limit || 20)
+  })
+
+  // Jobdori 사이트 검색 (수동 추가용)
+  ipcMain.handle('jobdori:search', async (_event, searchTerm: string) => {
+    try {
+      const results = await searchJobdoriSites(searchTerm)
+      return { success: true, results }
+    } catch (err: any) {
+      return { success: false, results: [], error: err.message }
+    }
+  })
+
+  // Jobdori 권고사항별 사이트 조회
+  ipcMain.handle('jobdori:sites-by-recommendation', async (_event, recommendation?: string) => {
+    try {
+      const results = await fetchSitesByRecommendation(recommendation)
+      return { success: true, results }
+    } catch (err: any) {
+      return { success: false, results: [], error: err.message }
+    }
+  })
+
+  // .env 파일 경로 반환
+  ipcMain.handle('jobdori:env-path', () => {
+    return path.join(app.getPath('userData'), '.env')
   })
 }

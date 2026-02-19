@@ -6,6 +6,7 @@ import SiteDetailPage from './pages/SiteDetailPage'
 import PersonsPage from './pages/PersonsPage'
 import PersonDetailPage from './pages/PersonDetailPage'
 import SettingsPage from './pages/SettingsPage'
+import JobdoriSyncPage from './pages/JobdoriSyncPage'
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
         <Route path="persons" element={<PersonsPage />} />
         <Route path="persons/:id" element={<PersonDetailPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="jobdori" element={<JobdoriSyncPage />} />
       </Route>
     </Routes>
   )

@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { path: '/network', label: '관계도', icon: '🔗', disabled: true },
   { path: '/timeline', label: '타임라인', icon: '📅', disabled: true },
   { path: '/ai-insights', label: 'AI 인사이트', icon: '🤖', disabled: true },
-  { path: '/jobdori', label: 'Jobdori 동기화', icon: '🔄', disabled: true },
+  { path: '/jobdori', label: 'Jobdori 동기화', icon: '🔄' },
 ]
 
 const BOTTOM_ITEMS = [

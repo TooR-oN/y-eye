@@ -181,6 +181,17 @@ export interface SyncLog {
   completed_at: string | null
 }
 
+export interface SyncResult {
+  success: boolean
+  sitesAdded: number
+  sitesUpdated: number
+  notesImported: number
+  domainChangesDetected: number
+  errors: string[]
+  duration: number
+  timestamp: string
+}
+
 // OSINT Categories
 export const OSINT_CATEGORIES = [
   { value: 'whois', label: 'WHOIS', icon: '🔍' },
@@ -285,6 +296,16 @@ export interface ElectronAPI {
   }
   app: {
     info: () => Promise<{ version: string; name: string; platform: string; userData: string }>
+  }
+  jobdori: {
+    connect: (databaseUrl?: string) => Promise<{ success: boolean; message: string; tables?: string[] }>
+    status: () => Promise<{ connected: boolean }>
+    disconnect: () => Promise<{ success: boolean }>
+    sync: (options?: { autoAddTopTargets?: boolean; autoAddOsintNeeded?: boolean; syncAllIllegal?: boolean }) => Promise<SyncResult>
+    syncHistory: (limit?: number) => Promise<SyncLog[]>
+    search: (searchTerm: string) => Promise<{ success: boolean; results: any[]; error?: string }>
+    sitesByRecommendation: (recommendation?: string) => Promise<{ success: boolean; results: any[]; error?: string }>
+    envPath: () => Promise<string>
   }
 }
 

@@ -331,6 +331,99 @@ export const mockElectronAPI: ElectronAPI = {
       userData: '/web-preview-mode',
     }),
   },
+
+  jobdori: {
+    connect: async (databaseUrl?: string) => {
+      console.log('[Mock] Jobdori connect:', databaseUrl ? 'URL provided' : 'no URL')
+      return {
+        success: true,
+        message: '(웹 프리뷰) Mock 연결 성공. 실제 Electron 앱에서 Neon DB에 연결됩니다.',
+        tables: ['sites', 'sessions', 'monthly_stats', 'titles', 'pending_reviews', 'domain_analysis_reports', 'domain_analysis_results', 'site_notes'],
+      }
+    },
+    status: async () => ({ connected: true }),
+    disconnect: async () => ({ success: true }),
+    sync: async (options?: any) => {
+      // Mock 동기화: 약간의 지연 후 샘플 결과 반환
+      await new Promise(r => setTimeout(r, 1500))
+
+      // Mock 데이터로 사이트 추가 시뮬레이션
+      const mockNewSites = [
+        { domain: 'newtoon.net', recommendation: '최상위 타겟', site_type: 'aggregator' },
+        { domain: 'webtoon-free.co', recommendation: 'OSINT 조사 필요', site_type: 'scanlation' },
+      ]
+
+      for (const ms of mockNewSites) {
+        const existing = Array.from(stores.sites.values()).find(s => s.domain === ms.domain)
+        if (!existing) {
+          const id = crypto.randomUUID()
+          stores.sites.set(id, {
+            id,
+            domain: ms.domain,
+            display_name: ms.domain,
+            site_type: ms.site_type,
+            status: 'active',
+            priority: ms.recommendation.includes('최상위') ? 'critical' : 'high',
+            recommendation: ms.recommendation,
+            jobdori_site_id: `mock-${id}`,
+            traffic_monthly: null,
+            traffic_rank: null,
+            unique_visitors: null,
+            investigation_status: 'pending',
+            parent_site_id: null,
+            notes: `Jobdori 동기화 (Mock): ${ms.recommendation}`,
+            created_at: now(),
+            updated_at: now(),
+            synced_at: now(),
+          })
+        }
+      }
+
+      return {
+        success: true,
+        sitesAdded: 2,
+        sitesUpdated: 1,
+        notesImported: 0,
+        domainChangesDetected: 0,
+        errors: [],
+        duration: 1500,
+        timestamp: now(),
+      }
+    },
+    syncHistory: async (limit?: number) => {
+      return [
+        { id: 'sync-001', sync_type: 'full', status: 'success', sites_added: 2, sites_updated: 3, error_message: null, started_at: now(), completed_at: now() },
+        { id: 'sync-002', sync_type: 'full', status: 'success', sites_added: 0, sites_updated: 1, error_message: null, started_at: '2026-02-17T10:00:00Z', completed_at: '2026-02-17T10:00:02Z' },
+      ]
+    },
+    search: async (searchTerm: string) => {
+      const mockResults = [
+        { domain: 'newtoon.net', threat_score: 85, total_visits: 1200000, recommendation: '최상위 타겟', site_type: 'Aggregator' },
+        { domain: 'webtoon-free.co', threat_score: 72, total_visits: 450000, recommendation: 'OSINT 조사 필요', site_type: 'Scanlation' },
+        { domain: 'manga-pirate.org', threat_score: 60, total_visits: 890000, recommendation: '모니터링 권고', site_type: 'Clone' },
+      ]
+      return {
+        success: true,
+        results: mockResults.filter(r => r.domain.includes(searchTerm.toLowerCase())),
+      }
+    },
+    sitesByRecommendation: async (recommendation?: string) => {
+      const mockResults = [
+        { domain: 'toonkor.com', threat_score: 95, total_visits: 15200000, recommendation: '최상위 타겟', site_type: 'Aggregator' },
+        { domain: 'manhwa-es.com', threat_score: 88, total_visits: 2340000, recommendation: '최상위 타겟', site_type: 'Scanlation' },
+        { domain: 'newtoon.net', threat_score: 85, total_visits: 1200000, recommendation: '최상위 타겟', site_type: 'Aggregator' },
+        { domain: 'webtoon-free.co', threat_score: 72, total_visits: 450000, recommendation: 'OSINT 조사 필요', site_type: 'Scanlation' },
+        { domain: 'ero18x.com', threat_score: 55, total_visits: 300000, recommendation: '모니터링 권고', site_type: 'Clone' },
+      ]
+      return {
+        success: true,
+        results: recommendation
+          ? mockResults.filter(r => r.recommendation === recommendation)
+          : mockResults,
+      }
+    },
+    envPath: async () => '/web-preview-mode/.env',
+  },
 }
 
 /**
