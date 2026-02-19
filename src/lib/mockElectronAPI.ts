@@ -215,6 +215,10 @@ export const mockElectronAPI: ElectronAPI = {
       stores.evidenceFiles.set(newFile.id, newFile)
       return newFile
     },
+    delete: async (id: string) => {
+      stores.evidenceFiles.delete(id)
+      return { success: true }
+    },
   },
 
   timeline: {
@@ -527,11 +531,99 @@ export const mockElectronAPI: ElectronAPI = {
 
   app: {
     info: async () => ({
-      version: '0.1.0',
+      version: '0.3.0',
       name: 'Y-EYE',
       platform: 'web-preview',
       userData: '/web-preview-mode',
     }),
+  },
+
+  data: {
+    exportAll: async () => {
+      const data = {
+        version: '0.3.0',
+        exportedAt: now(),
+        sites: Array.from(stores.sites.values()),
+        persons: Array.from(stores.persons.values()),
+        osintEntries: Array.from(stores.osintEntries.values()),
+        personSiteRelations: Array.from(stores.personSiteRelations.values()),
+        personRelations: Array.from(stores.personRelations.values()),
+        evidenceFiles: Array.from(stores.evidenceFiles.values()),
+        timelineEvents: Array.from(stores.timelineEvents.values()),
+        tags: Array.from(stores.tags.values()),
+        siteGroups: Array.from(stores.siteGroups.values()),
+        domainHistory: Array.from(stores.domainHistory.values()),
+        aiInsights: Array.from(stores.aiInsights.values()),
+      }
+      const json = JSON.stringify(data, null, 2)
+      const fileName = `y-eye-backup-${new Date().toISOString().split('T')[0]}.json`
+      console.log(`[Mock] Data exported: ${json.length} chars, ${fileName}`)
+      return { success: true, json, fileName }
+    },
+    importAll: async (json: string) => {
+      try {
+        const data = JSON.parse(json)
+        let counts = { sites: 0, persons: 0, osint: 0, timeline: 0 }
+
+        if (data.sites) {
+          data.sites.forEach((s: any) => stores.sites.set(s.id, s))
+          counts.sites = data.sites.length
+        }
+        if (data.persons) {
+          data.persons.forEach((p: any) => stores.persons.set(p.id, p))
+          counts.persons = data.persons.length
+        }
+        if (data.osintEntries) {
+          data.osintEntries.forEach((o: any) => stores.osintEntries.set(o.id, o))
+          counts.osint = data.osintEntries.length
+        }
+        if (data.personSiteRelations) {
+          data.personSiteRelations.forEach((r: any) => stores.personSiteRelations.set(r.id, r))
+        }
+        if (data.personRelations) {
+          data.personRelations.forEach((r: any) => stores.personRelations.set(r.id, r))
+        }
+        if (data.evidenceFiles) {
+          data.evidenceFiles.forEach((f: any) => stores.evidenceFiles.set(f.id, f))
+        }
+        if (data.timelineEvents) {
+          data.timelineEvents.forEach((e: any) => stores.timelineEvents.set(e.id, e))
+          counts.timeline = data.timelineEvents.length
+        }
+        if (data.tags) {
+          data.tags.forEach((t: any) => stores.tags.set(t.id, t))
+        }
+        if (data.domainHistory) {
+          data.domainHistory.forEach((d: any) => stores.domainHistory.set(d.id, d))
+        }
+        if (data.aiInsights) {
+          data.aiInsights.forEach((i: any) => stores.aiInsights.set(i.id, i))
+        }
+
+        console.log('[Mock] Data imported:', counts)
+        return { success: true, counts }
+      } catch (err) {
+        console.error('[Mock] Import failed:', err)
+        return { success: false, counts: { sites: 0, persons: 0, osint: 0, timeline: 0 } }
+      }
+    },
+    resetAll: async () => {
+      stores.sites.clear()
+      stores.persons.clear()
+      stores.osintEntries.clear()
+      stores.personSiteRelations.clear()
+      stores.personRelations.clear()
+      stores.evidenceFiles.clear()
+      stores.timelineEvents.clear()
+      stores.tags.clear()
+      stores.entityTags = []
+      stores.siteGroups.clear()
+      stores.siteGroupMembers = []
+      stores.domainHistory.clear()
+      stores.aiInsights.clear()
+      console.log('[Mock] All data reset')
+      return { success: true }
+    },
   },
 
   jobdori: {

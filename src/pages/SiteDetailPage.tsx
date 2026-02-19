@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
-import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult } from '@/shared/types'
+import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult, EvidenceFile } from '@/shared/types'
 import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
+import { useAutoSync } from '@/hooks/useAutoSync'
+import EvidenceUploadSection from '@/components/EvidenceUploadSection'
 
 export default function SiteDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { updateSiteAndSync, deleteSiteAndSync, deleteOsintAndSync } = useAutoSync()
   const [site, setSite] = useState<Site | null>(null)
   const [osintEntries, setOsintEntries] = useState<OsintEntry[]>([])
   const [relatedPersons, setRelatedPersons] = useState<PersonSiteRelation[]>([])
   const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [domainHistory, setDomainHistory] = useState<DomainHistory[]>([])
+  const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'osint' | 'persons' | 'timeline' | 'history'>('osint')
+  const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'persons' | 'timeline' | 'history'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<Site>>({})
@@ -24,18 +28,20 @@ export default function SiteDetailPage() {
   const loadData = useCallback(async () => {
     if (!id) return
     try {
-      const [siteData, osintData, personsData, timelineData, historyData] = await Promise.all([
+      const [siteData, osintData, personsData, timelineData, historyData, evidenceData] = await Promise.all([
         window.electronAPI.sites.get(id),
         window.electronAPI.osint.list({ entity_type: 'site', entity_id: id }),
         window.electronAPI.personSiteRelations.list({ site_id: id }),
         window.electronAPI.timeline.list({ entity_type: 'site', entity_id: id, limit: 20 }),
         window.electronAPI.domainHistory.list(id),
+        window.electronAPI.evidence.list({ entity_type: 'site', entity_id: id }),
       ])
       setSite(siteData)
       setOsintEntries(osintData)
       setRelatedPersons(personsData)
       setTimeline(timelineData)
       setDomainHistory(historyData)
+      setEvidenceFiles(evidenceData)
       if (siteData) setEditForm(siteData)
     } catch (err) {
       console.error('Failed to load site:', err)
@@ -50,7 +56,7 @@ export default function SiteDetailPage() {
     if (!id || !editForm) return
     try {
       const { id: _, created_at, updated_at, synced_at, ...updates } = editForm as any
-      await window.electronAPI.sites.update(id, updates)
+      await updateSiteAndSync(id, updates)
       setEditing(false)
       loadData()
     } catch (err) {
@@ -61,7 +67,7 @@ export default function SiteDetailPage() {
   async function handleDelete() {
     if (!id || !confirm('이 사이트를 삭제하시겠습니까? 관련된 모든 OSINT 정보도 삭제됩니다.')) return
     try {
-      await window.electronAPI.sites.delete(id)
+      await deleteSiteAndSync(id)
       navigate('/sites')
     } catch (err) {
       console.error('Failed to delete site:', err)
@@ -90,6 +96,7 @@ export default function SiteDetailPage() {
 
   const tabs = [
     { key: 'osint', label: '인프라 정보', count: osintEntries.length },
+    { key: 'evidence', label: '증거 파일', count: evidenceFiles.length },
     { key: 'persons', label: '연관 인물', count: relatedPersons.length },
     { key: 'timeline', label: '타임라인', count: timeline.length },
     { key: 'history', label: '도메인 이력', count: domainHistory.length },
@@ -237,12 +244,24 @@ export default function SiteDetailPage() {
             <div className="space-y-3">
               {osintEntries.map(entry => (
                 <OsintEntryCard key={entry.id} entry={entry} onDelete={async () => {
-                  await window.electronAPI.osint.delete(entry.id)
+                  await deleteOsintAndSync(entry.id, 'site', id)
                   loadData()
                 }} />
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'evidence' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-medium text-dark-300">증거 파일</h3>
+          <EvidenceUploadSection
+            entityType="site"
+            entityId={id!}
+            evidenceFiles={evidenceFiles}
+            onUpdated={loadData}
+          />
         </div>
       )}
 
@@ -554,6 +573,7 @@ function PersonDetailCard({ relation, navigate }: { relation: PersonSiteRelation
 export function AddOsintModal({ entityType, entityId, onClose, onCreated }: {
   entityType: 'site' | 'person'; entityId: string; onClose: () => void; onCreated: () => void
 }) {
+  const { createOsintAndSync } = useAutoSync()
   const [category, setCategory] = useState('custom')
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -568,7 +588,7 @@ export function AddOsintModal({ entityType, entityId, onClose, onCreated }: {
 
     setSaving(true)
     try {
-      await window.electronAPI.osint.create({
+      await createOsintAndSync({
         id: uuidv4(),
         entity_type: entityType,
         entity_id: entityId,

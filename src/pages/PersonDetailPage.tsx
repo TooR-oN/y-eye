@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { Person, OsintEntry, PersonSiteRelation, PersonRelation, MarkdownExportResult } from '@/shared/types'
+import type { Person, OsintEntry, PersonSiteRelation, PersonRelation, MarkdownExportResult, EvidenceFile } from '@/shared/types'
 import { OSINT_CATEGORIES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
 import { AddOsintModal } from './SiteDetailPage'
 import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
+import { useAutoSync } from '@/hooks/useAutoSync'
+import EvidenceUploadSection from '@/components/EvidenceUploadSection'
 
 const RISK_LABELS: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
 const STATUS_LABELS: Record<string, string> = { active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인' }
@@ -12,12 +14,14 @@ const RELATION_LABELS: Record<string, string> = { partner: '동업', associate: 
 export default function PersonDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { updatePersonAndSync, deletePersonAndSync } = useAutoSync()
   const [person, setPerson] = useState<Person | null>(null)
   const [osintEntries, setOsintEntries] = useState<OsintEntry[]>([])
   const [relatedSites, setRelatedSites] = useState<PersonSiteRelation[]>([])
   const [personRelations, setPersonRelations] = useState<PersonRelation[]>([])
+  const [evidenceFiles, setEvidenceFiles] = useState<EvidenceFile[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'osint' | 'sites' | 'relations'>('osint')
+  const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'sites' | 'relations'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<Person>>({})
@@ -27,16 +31,18 @@ export default function PersonDetailPage() {
   const loadData = useCallback(async () => {
     if (!id) return
     try {
-      const [personData, osintData, sitesData, relationsData] = await Promise.all([
+      const [personData, osintData, sitesData, relationsData, evidenceData] = await Promise.all([
         window.electronAPI.persons.get(id),
         window.electronAPI.osint.list({ entity_type: 'person', entity_id: id }),
         window.electronAPI.personSiteRelations.list({ person_id: id }),
         window.electronAPI.personRelations.list(id),
+        window.electronAPI.evidence.list({ entity_type: 'person', entity_id: id }),
       ])
       setPerson(personData)
       setOsintEntries(osintData)
       setRelatedSites(sitesData)
       setPersonRelations(relationsData)
+      setEvidenceFiles(evidenceData)
       if (personData) setEditForm(personData)
     } catch (err) {
       console.error('Failed to load person:', err)
@@ -51,7 +57,7 @@ export default function PersonDetailPage() {
     if (!id) return
     try {
       const { id: _, created_at, updated_at, ...updates } = editForm as any
-      await window.electronAPI.persons.update(id, updates)
+      await updatePersonAndSync(id, updates)
       setEditing(false)
       loadData()
     } catch (err) {
@@ -62,7 +68,7 @@ export default function PersonDetailPage() {
   async function handleDelete() {
     if (!id || !confirm('이 인물을 삭제하시겠습니까?')) return
     try {
-      await window.electronAPI.persons.delete(id)
+      await deletePersonAndSync(id)
       navigate('/persons')
     } catch (err) {
       console.error('Failed to delete person:', err)
@@ -87,6 +93,7 @@ export default function PersonDetailPage() {
 
   const tabs = [
     { key: 'osint', label: '인프라 정보', count: osintEntries.length },
+    { key: 'evidence', label: '증거 파일', count: evidenceFiles.length },
     { key: 'sites', label: '관련 사이트', count: relatedSites.length },
     { key: 'relations', label: '인물 관계', count: personRelations.length },
   ] as const
@@ -231,6 +238,18 @@ export default function PersonDetailPage() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'evidence' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-medium text-dark-300">증거 파일</h3>
+          <EvidenceUploadSection
+            entityType="person"
+            entityId={id!}
+            evidenceFiles={evidenceFiles}
+            onUpdated={loadData}
+          />
         </div>
       )}
 

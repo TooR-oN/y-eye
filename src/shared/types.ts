@@ -286,6 +286,7 @@ export interface ElectronAPI {
   evidence: {
     list: (filters: any) => Promise<EvidenceFile[]>
     create: (file: any) => Promise<EvidenceFile>
+    delete: (id: string) => Promise<{ success: boolean }>
   }
   timeline: {
     list: (filters: any) => Promise<TimelineEvent[]>
@@ -321,6 +322,11 @@ export interface ElectronAPI {
   }
   app: {
     info: () => Promise<{ version: string; name: string; platform: string; userData: string }>
+  }
+  data: {
+    exportAll: () => Promise<{ success: boolean; json: string; fileName: string }>
+    importAll: (json: string) => Promise<{ success: boolean; counts: { sites: number; persons: number; osint: number; timeline: number } }>
+    resetAll: () => Promise<{ success: boolean }>
   }
   jobdori: {
     connect: (databaseUrl?: string) => Promise<{ success: boolean; message: string; tables?: string[] }>

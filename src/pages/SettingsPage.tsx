@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { ObsidianConfig } from '@/shared/types'
 
 export default function SettingsPage() {
@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [vaultValid, setVaultValid] = useState<boolean | null>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     loadSettings()
@@ -328,18 +329,101 @@ export default function SettingsPage() {
         <h2 className="text-sm font-semibold text-dark-200 flex items-center gap-2">
           <span>💾</span> 데이터 관리
         </h2>
-        <div className="flex gap-3">
-          <button className="btn-secondary btn-sm" disabled>
-            데이터 내보내기 (JSON)
-          </button>
-          <button className="btn-secondary btn-sm" disabled>
-            데이터 가져오기
-          </button>
-          <button className="btn-danger btn-sm" disabled>
-            전체 데이터 초기화
-          </button>
+        <div className="space-y-3">
+          {/* Export */}
+          <div className="flex items-center justify-between bg-dark-800/30 rounded-lg px-4 py-3">
+            <div>
+              <p className="text-sm text-dark-200">데이터 내보내기 (JSON)</p>
+              <p className="text-[10px] text-dark-500">모든 사이트, 인물, OSINT, 타임라인 데이터를 JSON 파일로 저장</p>
+            </div>
+            <button
+              onClick={async () => {
+                try {
+                  const result = await window.electronAPI.data.exportAll()
+                  if (result.success) {
+                    const blob = new Blob([result.json], { type: 'application/json' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = result.fileName
+                    document.body.appendChild(a)
+                    a.click()
+                    document.body.removeChild(a)
+                    URL.revokeObjectURL(url)
+                  }
+                } catch (err) {
+                  console.error('Export failed:', err)
+                }
+              }}
+              className="btn-secondary btn-sm whitespace-nowrap"
+            >
+              📥 내보내기
+            </button>
+          </div>
+
+          {/* Import */}
+          <div className="flex items-center justify-between bg-dark-800/30 rounded-lg px-4 py-3">
+            <div>
+              <p className="text-sm text-dark-200">데이터 가져오기</p>
+              <p className="text-[10px] text-dark-500">이전에 내보낸 JSON 파일에서 데이터를 복원 (기존 데이터에 병합)</p>
+            </div>
+            <div>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  try {
+                    const json = await file.text()
+                    const result = await window.electronAPI.data.importAll(json)
+                    if (result.success) {
+                      alert(`가져오기 완료!\n\n사이트: ${result.counts.sites}건\n인물: ${result.counts.persons}건\nOSINT: ${result.counts.osint}건\n타임라인: ${result.counts.timeline}건`)
+                    }
+                  } catch (err) {
+                    console.error('Import failed:', err)
+                    alert('가져오기 실패: 올바른 JSON 파일인지 확인하세요.')
+                  }
+                  if (importFileRef.current) importFileRef.current.value = ''
+                }}
+              />
+              <button
+                onClick={() => importFileRef.current?.click()}
+                className="btn-secondary btn-sm whitespace-nowrap"
+              >
+                📤 가져오기
+              </button>
+            </div>
+          </div>
+
+          {/* Reset */}
+          <div className="flex items-center justify-between bg-red-500/5 border border-red-500/10 rounded-lg px-4 py-3">
+            <div>
+              <p className="text-sm text-red-400">전체 데이터 초기화</p>
+              <p className="text-[10px] text-dark-500">모든 데이터를 삭제합니다. 이 작업은 되돌릴 수 없습니다.</p>
+            </div>
+            <button
+              onClick={async () => {
+                const confirm1 = confirm('정말로 모든 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')
+                if (!confirm1) return
+                const confirm2 = confirm('마지막 확인: 사이트, 인물, OSINT, 타임라인 등 모든 데이터가 삭제됩니다.\n\n계속하시겠습니까?')
+                if (!confirm2) return
+                try {
+                  await window.electronAPI.data.resetAll()
+                  alert('모든 데이터가 초기화되었습니다.')
+                  window.location.reload()
+                } catch (err) {
+                  console.error('Reset failed:', err)
+                }
+              }}
+              className="btn-danger btn-sm whitespace-nowrap"
+            >
+              ⚠️ 초기화
+            </button>
+          </div>
         </div>
-        <p className="text-[10px] text-dark-600">Phase 6에서 구현 예정</p>
       </div>
 
       {/* Save Button */}
