@@ -6,7 +6,7 @@ const NAV_ITEMS = [
   { path: '/persons', label: '인물', icon: '👤' },
   { path: '/network', label: '관계도', icon: '🔗' },
   { path: '/timeline', label: '타임라인', icon: '📅' },
-  { path: '/ai-insights', label: 'AI 인사이트', icon: '🤖', disabled: true },
+  { path: '/ai-insights', label: 'AI 인사이트', icon: '🤖' },
   { path: '/jobdori', label: 'Jobdori 동기화', icon: '🔄' },
 ]
 
@@ -70,7 +70,7 @@ export default function Layout() {
             </NavLink>
           ))}
           <div className="px-3 pt-2">
-            <p className="text-[10px] text-dark-600">v0.2.0 — Phase 3</p>
+            <p className="text-[10px] text-dark-600">v0.3.0 — Phase 4</p>
           </div>
         </div>
       </aside>

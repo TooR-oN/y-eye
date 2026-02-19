@@ -307,6 +307,11 @@ export interface ElectronAPI {
     sitesByRecommendation: (recommendation?: string) => Promise<{ success: boolean; results: any[]; error?: string }>
     envPath: () => Promise<string>
   }
+  aiInsights: {
+    list: (filters?: { entity_type?: string; entity_id?: string; status?: string }) => Promise<AiInsight[]>
+    analyze: (entityType: 'site' | 'person', entityId: string) => Promise<AiInsight[]>
+    updateStatus: (id: string, status: 'confirmed' | 'dismissed' | 'reviewed') => Promise<{ success: boolean }>
+  }
 }
 
 declare global {

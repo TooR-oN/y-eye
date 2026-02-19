@@ -3,7 +3,7 @@
  * Electron 환경이 아닐 때 (웹 브라우저에서 Vite dev server로 실행 시)
  * 메모리 기반 데이터로 동작하는 mock API
  */
-import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats } from '@/shared/types'
+import type { ElectronAPI, Site, Person, OsintEntry, PersonSiteRelation, PersonRelation, EvidenceFile, TimelineEvent, Tag, SiteGroup, DomainHistory, DashboardStats, AiInsight } from '@/shared/types'
 
 // In-memory data stores
 const stores = {
@@ -19,6 +19,7 @@ const stores = {
   siteGroups: new Map<string, SiteGroup>(),
   siteGroupMembers: [] as { group_id: string; site_id: string; role: string; added_at: string }[],
   domainHistory: new Map<string, DomainHistory>(),
+  aiInsights: new Map<string, AiInsight>(),
 }
 
 function now() { return new Date().toISOString() }
@@ -423,6 +424,193 @@ export const mockElectronAPI: ElectronAPI = {
       }
     },
     envPath: async () => '/web-preview-mode/.env',
+  },
+
+  aiInsights: {
+    list: async (filters?: any) => {
+      let results = Array.from(stores.aiInsights.values())
+      if (filters?.entity_type && filters?.entity_id) {
+        results = results.filter(i => {
+          const entities = i.related_entities ? JSON.parse(i.related_entities) : []
+          return entities.some((e: any) => e.type === filters.entity_type && e.id === filters.entity_id)
+        })
+      }
+      if (filters?.status) results = results.filter(i => i.status === filters.status)
+      return results.sort((a, b) => b.analyzed_at.localeCompare(a.analyzed_at))
+    },
+    analyze: async (entityType: 'site' | 'person', entityId: string) => {
+      // Mock: 분석 시뮬레이션 (1.5초 지연)
+      await new Promise(r => setTimeout(r, 1500))
+
+      const entity = entityType === 'site'
+        ? stores.sites.get(entityId)
+        : stores.persons.get(entityId)
+      if (!entity) return []
+
+      const entityName = entityType === 'site'
+        ? (entity as Site).display_name || (entity as Site).domain
+        : (entity as Person).alias || (entity as Person).real_name || '미확인'
+
+      // 관련 OSINT 데이터 수집
+      const osintEntries = Array.from(stores.osintEntries.values())
+        .filter(o => o.entity_type === entityType && o.entity_id === entityId)
+
+      // Mock 인사이트 생성
+      const mockInsights: AiInsight[] = []
+      const ts = now()
+
+      if (entityType === 'site') {
+        const site = entity as Site
+        // 관련 인물 확인
+        const relations = Array.from(stores.personSiteRelations.values())
+          .filter(r => r.site_id === entityId)
+
+        if (relations.length > 0) {
+          const personIds = relations.map(r => r.person_id)
+          const otherSites = Array.from(stores.personSiteRelations.values())
+            .filter(r => personIds.includes(r.person_id) && r.site_id !== entityId)
+
+          if (otherSites.length > 0) {
+            const otherSite = stores.sites.get(otherSites[0].site_id)
+            const person = stores.persons.get(otherSites[0].person_id)
+            const insight: AiInsight = {
+              id: crypto.randomUUID(),
+              insight_type: 'connection',
+              title: `${site.domain}과 ${otherSite?.domain || '알 수 없음'} 간 운영자 연결 가능성`,
+              description: `${person?.alias || '미확인'} 인물이 두 사이트 모두에 연관되어 있습니다. OSINT 데이터(${osintEntries.length}건) 분석 결과, 동일 인프라를 공유할 가능성이 있습니다.`,
+              related_entities: JSON.stringify([
+                { type: 'site', id: entityId, name: site.domain },
+                { type: 'site', id: otherSites[0].site_id, name: otherSite?.domain },
+                { type: 'person', id: otherSites[0].person_id, name: person?.alias },
+              ]),
+              confidence: 0.85,
+              status: 'new',
+              ai_model: 'mock-ai',
+              analyzed_at: ts,
+              reviewed_at: null,
+            }
+            stores.aiInsights.set(insight.id, insight)
+            mockInsights.push(insight)
+          }
+        }
+
+        // OSINT 패턴 분석
+        if (osintEntries.length >= 2) {
+          const insight: AiInsight = {
+            id: crypto.randomUUID(),
+            insight_type: 'pattern',
+            title: `${site.domain} OSINT 데이터 교차 분석 결과`,
+            description: `${osintEntries.length}건의 수집된 정보를 분석했습니다. ${osintEntries.filter(o => o.is_key_evidence).length}건의 핵심 증거가 발견되었으며, 이를 통해 운영자 추적의 단서를 확보할 수 있습니다.`,
+            related_entities: JSON.stringify([
+              { type: 'site', id: entityId, name: site.domain },
+            ]),
+            confidence: 0.72,
+            status: 'new',
+            ai_model: 'mock-ai',
+            analyzed_at: ts,
+            reviewed_at: null,
+          }
+          stores.aiInsights.set(insight.id, insight)
+          mockInsights.push(insight)
+        }
+
+        // 도메인 이력 분석
+        const domainHistory = Array.from(stores.domainHistory.values()).filter(d => d.site_id === entityId)
+        if (domainHistory.length > 0) {
+          const insight: AiInsight = {
+            id: crypto.randomUUID(),
+            insight_type: 'anomaly',
+            title: `${site.domain} 도메인 변경 패턴 감지`,
+            description: `이 사이트는 ${domainHistory.length}회의 도메인 변경 이력이 있습니다. 빈번한 도메인 변경은 법적 조치 회피 가능성을 시사합니다.`,
+            related_entities: JSON.stringify([
+              { type: 'site', id: entityId, name: site.domain },
+            ]),
+            confidence: 0.68,
+            status: 'new',
+            ai_model: 'mock-ai',
+            analyzed_at: ts,
+            reviewed_at: null,
+          }
+          stores.aiInsights.set(insight.id, insight)
+          mockInsights.push(insight)
+        }
+      } else {
+        // 인물 분석
+        const person = entity as Person
+        const relations = Array.from(stores.personSiteRelations.values())
+          .filter(r => r.person_id === entityId)
+
+        if (relations.length > 1) {
+          const siteNames = relations.map(r => stores.sites.get(r.site_id)?.domain || '알 수 없음')
+          const insight: AiInsight = {
+            id: crypto.randomUUID(),
+            insight_type: 'pattern',
+            title: `${entityName} — 다중 사이트 운영 패턴`,
+            description: `이 인물은 ${relations.length}개 사이트(${siteNames.join(', ')})에 연관되어 있습니다. 역할 분석 결과 조직적 운영 가능성이 있습니다.`,
+            related_entities: JSON.stringify([
+              { type: 'person', id: entityId, name: entityName },
+              ...relations.map(r => ({ type: 'site', id: r.site_id, name: stores.sites.get(r.site_id)?.domain })),
+            ]),
+            confidence: 0.78,
+            status: 'new',
+            ai_model: 'mock-ai',
+            analyzed_at: ts,
+            reviewed_at: null,
+          }
+          stores.aiInsights.set(insight.id, insight)
+          mockInsights.push(insight)
+        }
+
+        if (osintEntries.length > 0) {
+          const insight: AiInsight = {
+            id: crypto.randomUUID(),
+            insight_type: 'recommendation',
+            title: `${entityName} 추가 조사 권고`,
+            description: `현재 ${osintEntries.length}건의 정보가 수집되어 있습니다. SNS/소셜 미디어 및 결제 정보 추적을 통해 신원 확인 가능성을 높일 수 있습니다.`,
+            related_entities: JSON.stringify([
+              { type: 'person', id: entityId, name: entityName },
+            ]),
+            confidence: 0.65,
+            status: 'new',
+            ai_model: 'mock-ai',
+            analyzed_at: ts,
+            reviewed_at: null,
+          }
+          stores.aiInsights.set(insight.id, insight)
+          mockInsights.push(insight)
+        }
+      }
+
+      // 분석 결과가 없을 경우 기본 인사이트
+      if (mockInsights.length === 0) {
+        const insight: AiInsight = {
+          id: crypto.randomUUID(),
+          insight_type: 'recommendation',
+          title: `${entityName} — 추가 데이터 수집 필요`,
+          description: '현재 수집된 OSINT 정보가 부족하여 의미 있는 분석을 수행하기 어렵습니다. 더 많은 정보를 수집한 후 다시 분석을 실행해주세요.',
+          related_entities: JSON.stringify([
+            { type: entityType, id: entityId, name: entityName },
+          ]),
+          confidence: 0.3,
+          status: 'new',
+          ai_model: 'mock-ai',
+          analyzed_at: ts,
+          reviewed_at: null,
+        }
+        stores.aiInsights.set(insight.id, insight)
+        mockInsights.push(insight)
+      }
+
+      return mockInsights
+    },
+    updateStatus: async (id: string, status: 'confirmed' | 'dismissed' | 'reviewed') => {
+      const insight = stores.aiInsights.get(id)
+      if (!insight) throw new Error('Insight not found')
+      insight.status = status
+      insight.reviewed_at = now()
+      stores.aiInsights.set(id, insight)
+      return { success: true }
+    },
   },
 }
 

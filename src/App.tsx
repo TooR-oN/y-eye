@@ -9,6 +9,7 @@ import SettingsPage from './pages/SettingsPage'
 import JobdoriSyncPage from './pages/JobdoriSyncPage'
 import NetworkPage from './pages/NetworkPage'
 import TimelinePage from './pages/TimelinePage'
+import AiInsightsPage from './pages/AiInsightsPage'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="persons/:id" element={<PersonDetailPage />} />
         <Route path="network" element={<NetworkPage />} />
         <Route path="timeline" element={<TimelinePage />} />
+        <Route path="ai-insights" element={<AiInsightsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="jobdori" element={<JobdoriSyncPage />} />
       </Route>
