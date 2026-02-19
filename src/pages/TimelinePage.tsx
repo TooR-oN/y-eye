@@ -31,7 +31,12 @@ export default function TimelinePage() {
   const [loading, setLoading] = useState(true)
   const [filterImportance, setFilterImportance] = useState('')
   const [filterEntityType, setFilterEntityType] = useState('')
+  const [filterEntityId, setFilterEntityId] = useState('')
   const [filterEventType, setFilterEventType] = useState('')
+
+  // Entity lists for filter dropdowns
+  const [sites, setSites] = useState<Site[]>([])
+  const [persons, setPersons] = useState<Person[]>([])
 
   // Entity name cache
   const [entityNames, setEntityNames] = useState<Map<string, { name: string; type: string }>>(new Map())
@@ -44,11 +49,13 @@ export default function TimelinePage() {
         window.electronAPI.persons.list(),
       ])
 
-      // Cache entity names
+      // Cache entity names + store lists for filter
       const names = new Map<string, { name: string; type: string }>()
       sites.forEach((s: Site) => names.set(s.id, { name: s.display_name || s.domain, type: 'site' }))
       persons.forEach((p: Person) => names.set(p.id, { name: p.alias || p.real_name || '미확인', type: 'person' }))
       setEntityNames(names)
+      setSites(sites)
+      setPersons(persons)
 
       // Load all events
       const allEvents: TimelineEvent[] = []
@@ -86,6 +93,7 @@ export default function TimelinePage() {
   const filteredEvents = events.filter(e => {
     if (filterImportance && e.importance !== filterImportance) return false
     if (filterEntityType && e.entity_type !== filterEntityType) return false
+    if (filterEntityId && e.entity_id !== filterEntityId) return false
     if (filterEventType && e.event_type !== filterEventType) return false
     return true
   })
@@ -151,13 +159,39 @@ export default function TimelinePage() {
 
         <select
           value={filterEntityType}
-          onChange={e => setFilterEntityType(e.target.value)}
+          onChange={e => { setFilterEntityType(e.target.value); setFilterEntityId('') }}
           className="select w-32"
         >
           <option value="">전체 대상</option>
           <option value="site">사이트</option>
           <option value="person">인물</option>
         </select>
+
+        {/* 특정 사이트/인물 선택 드롭다운 */}
+        {filterEntityType === 'site' && (
+          <select
+            value={filterEntityId}
+            onChange={e => setFilterEntityId(e.target.value)}
+            className="select w-48"
+          >
+            <option value="">전체 사이트</option>
+            {sites.map(s => (
+              <option key={s.id} value={s.id}>{s.display_name || s.domain}</option>
+            ))}
+          </select>
+        )}
+        {filterEntityType === 'person' && (
+          <select
+            value={filterEntityId}
+            onChange={e => setFilterEntityId(e.target.value)}
+            className="select w-48"
+          >
+            <option value="">전체 인물</option>
+            {persons.map(p => (
+              <option key={p.id} value={p.id}>{p.alias || p.real_name || '미확인'}</option>
+            ))}
+          </select>
+        )}
 
         <select
           value={filterEventType}
@@ -170,9 +204,9 @@ export default function TimelinePage() {
           ))}
         </select>
 
-        {(filterImportance || filterEntityType || filterEventType) && (
+        {(filterImportance || filterEntityType || filterEntityId || filterEventType) && (
           <button
-            onClick={() => { setFilterImportance(''); setFilterEntityType(''); setFilterEventType('') }}
+            onClick={() => { setFilterImportance(''); setFilterEntityType(''); setFilterEntityId(''); setFilterEventType('') }}
             className="text-xs text-dark-500 hover:text-dark-300"
           >
             필터 초기화
