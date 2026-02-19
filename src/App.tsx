@@ -7,6 +7,8 @@ import PersonsPage from './pages/PersonsPage'
 import PersonDetailPage from './pages/PersonDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import JobdoriSyncPage from './pages/JobdoriSyncPage'
+import NetworkPage from './pages/NetworkPage'
+import TimelinePage from './pages/TimelinePage'
 
 export default function App() {
   return (
@@ -17,6 +19,8 @@ export default function App() {
         <Route path="sites/:id" element={<SiteDetailPage />} />
         <Route path="persons" element={<PersonsPage />} />
         <Route path="persons/:id" element={<PersonDetailPage />} />
+        <Route path="network" element={<NetworkPage />} />
+        <Route path="timeline" element={<TimelinePage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="jobdori" element={<JobdoriSyncPage />} />
       </Route>

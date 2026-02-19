@@ -85,9 +85,56 @@ export default function DashboardPage() {
         ))}
       </div>
 
+      {/* Quick Actions */}
+      <div className="grid grid-cols-3 gap-4">
+        <div
+          className="card cursor-pointer hover:border-blue-500/30 transition-all group"
+          onClick={() => navigate('/network')}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔗</span>
+            <div>
+              <p className="text-sm font-medium text-dark-200 group-hover:text-blue-400 transition-colors">관계도</p>
+              <p className="text-xs text-dark-500">사이트-인물 네트워크 시각화</p>
+            </div>
+          </div>
+        </div>
+        <div
+          className="card cursor-pointer hover:border-purple-500/30 transition-all group"
+          onClick={() => navigate('/timeline')}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">📅</span>
+            <div>
+              <p className="text-sm font-medium text-dark-200 group-hover:text-purple-400 transition-colors">타임라인</p>
+              <p className="text-xs text-dark-500">조사 이벤트 시간순 기록</p>
+            </div>
+          </div>
+        </div>
+        <div
+          className="card cursor-pointer hover:border-amber-500/30 transition-all group"
+          onClick={() => navigate('/jobdori')}
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔄</span>
+            <div>
+              <p className="text-sm font-medium text-dark-200 group-hover:text-amber-400 transition-colors">Jobdori 동기화</p>
+              <p className="text-xs text-dark-500">모니터링 데이터 연동</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Recent Timeline */}
       <div className="card">
-        <h2 className="text-sm font-semibold text-dark-200 mb-4">최근 활동</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-dark-200">최근 활동</h2>
+          {stats?.recentEvents && stats.recentEvents.length > 0 && (
+            <button onClick={() => navigate('/timeline')} className="text-xs text-dark-500 hover:text-dark-300 transition-colors">
+              전체 보기 →
+            </button>
+          )}
+        </div>
         {stats?.recentEvents && stats.recentEvents.length > 0 ? (
           <div className="space-y-3">
             {stats.recentEvents.map(event => (
