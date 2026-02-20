@@ -559,6 +559,19 @@ function registerIpcHandlers() {
   })
 
   // ============================================
+  // App Settings (Generic key-value)
+  // ============================================
+  ipcMain.handle('settings:get', (_event, key: string) => {
+    const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key) as any
+    return row?.value || null
+  })
+
+  ipcMain.handle('settings:set', (_event, key: string, value: string) => {
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))").run(key, value)
+    return { success: true }
+  })
+
+  // ============================================
   // Evidence Delete (Phase 6)
   // ============================================
   ipcMain.handle('db:evidence:delete', (_event, id: string) => {

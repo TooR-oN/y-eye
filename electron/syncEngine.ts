@@ -28,21 +28,32 @@ export interface SyncResult {
   timestamp: string
 }
 
-// 권고사항 → priority 매핑 (확장)
+// 권고사항 → priority 매핑
+// Jobdori 실제 라벨 (Section 8.2): 최상위 타겟 지정, OSINT 조사 필요, DMCA 집중 강화,
+// 신규 위협 주시, 모니터링 유지, 데이터 수집 필요
+// 영문: Urgent Block, Priority Block, Block, Monitor, Low Priority, No Data
 function mapRecommendationToPriority(rec: string | null): string {
   if (!rec) return 'low'
   const lower = rec.toLowerCase()
-  if (lower.includes('최상위') || lower.includes('top target') || lower.includes('top_target') || lower.includes('critical') || lower.includes('urgent') || lower.includes('긴급') || lower.includes('즉시')) return 'critical'
-  if (lower.includes('osint') || lower.includes('조사 필요') || lower.includes('조사필요') || lower.includes('investigation') || lower.includes('high') || lower.includes('주의')) return 'high'
-  if (lower.includes('모니터링') || lower.includes('monitoring') || lower.includes('watch') || lower.includes('추적')) return 'medium'
-  // recommendation이 있지만 매칭 안 되면 medium
+  // 최상위 (critical)
+  if (lower.includes('최상위') || lower.includes('타겟') || lower.includes('urgent block') || lower.includes('urgent')) return 'critical'
+  // 고위험 (high)
+  if (lower.includes('osint') || lower.includes('조사') || lower.includes('priority block') || lower.includes('dmca') || lower.includes('집중')) return 'high'
+  // 중간 (medium)
+  if (lower.includes('신규') || lower.includes('주시') || lower.includes('긴급') || lower.includes('격상') || lower.includes('block')) return 'medium'
+  // 모니터링/낮음 (low)
+  if (lower.includes('모니터링') || lower.includes('monitor') || lower.includes('조치 효과') || lower.includes('확인')) return 'low'
+  // Low Priority / No Data / 데이터 수집 필요
+  if (lower.includes('low priority') || lower.includes('no data') || lower.includes('데이터 수집')) return 'low'
+  // 그 외 비어있지 않으면 medium
   if (rec.trim().length > 0) return 'medium'
   return 'low'
 }
 
 // site_type 매핑 (Jobdori → Y-EYE)
+// Jobdori 값: scanlation_group, aggregator, clone, blog, unclassified
 function mapSiteType(jobdoriType: string | null): string | null {
-  if (!jobdoriType) return null
+  if (!jobdoriType || jobdoriType === 'unclassified') return null
   const lower = jobdoriType.toLowerCase()
   if (lower.includes('aggregator')) return 'aggregator'
   if (lower.includes('scanlation')) return 'scanlation'
@@ -52,12 +63,13 @@ function mapSiteType(jobdoriType: string | null): string | null {
 }
 
 // site_status 매핑 (Jobdori → Y-EYE)
+// Jobdori 값: active, closed, changed
 function mapSiteStatus(jobdoriStatus: string | null): string {
   if (!jobdoriStatus) return 'unknown'
   const lower = jobdoriStatus.toLowerCase()
   if (lower === 'active' || lower === '운영중') return 'active'
   if (lower === 'closed' || lower === '폐쇄') return 'closed'
-  if (lower === 'redirected' || lower.includes('변경') || lower.includes('redirect')) return 'redirected'
+  if (lower === 'changed' || lower === 'redirected' || lower.includes('변경') || lower.includes('redirect')) return 'redirected'
   return 'unknown'
 }
 
@@ -116,37 +128,60 @@ export async function runSync(options?: {
       const recommendation = analysisResult.recommendation || ''
       const recLower = recommendation.toLowerCase()
 
-      // 확장된 매칭: 다양한 형태의 recommendation 값 지원
+      // Jobdori Handover 문서 Section 8.2 기반 키워드 매칭
+      // 실제 라벨: 최상위 타겟 지정, OSINT 조사 필요, DMCA 집중 강화,
+      //           신규 위협 주시, 모니터링 유지, 데이터 수집 필요
+      // 영문: Urgent Block, Priority Block, Block, Monitor, Low Priority, No Data
+
+      // 우선순위 1: 최상위 타겟 / Urgent Block
       const isTopTarget = (
         recLower.includes('최상위') ||
-        recLower.includes('top target') ||
-        recLower.includes('top_target') ||
-        recLower.includes('critical') ||
-        recLower.includes('urgent') ||
-        recLower.includes('high priority') ||
-        recLower.includes('즉시') ||
-        recLower.includes('긴급')
+        recLower.includes('타겟') ||
+        recLower.includes('urgent block') ||
+        recLower.includes('urgent')
       )
+      // 우선순위 2: OSINT 조사 필요 / Priority Block
       const isOsintNeeded = (
         recLower.includes('osint') ||
-        recLower.includes('조사 필요') ||
-        recLower.includes('조사필요') ||
-        recLower.includes('investigation') ||
-        recLower.includes('monitor') ||
+        recLower.includes('조사') ||
+        recLower.includes('priority block')
+      )
+      // 우선순위 3: DMCA 집중 강화 / Block
+      const isBlockTarget = (
+        recLower.includes('dmca') ||
+        recLower.includes('집중') ||
+        recLower.includes('block')
+      )
+      // 우선순위 4: 신규 위협 주시 / 긴급 / 격상
+      const isNewThreat = (
+        recLower.includes('신규') ||
+        recLower.includes('주시') ||
+        recLower.includes('긴급') ||
+        recLower.includes('격상')
+      )
+      // 우선순위 5: 모니터링 유지 / Monitor / 조치 효과
+      const isMonitorTarget = (
         recLower.includes('모니터링') ||
-        recLower.includes('추적') ||
-        recLower.includes('분석') ||
-        recLower.includes('주의') ||
-        recLower.includes('watch')
+        recLower.includes('monitor') ||
+        recLower.includes('조치 효과') ||
+        recLower.includes('확인')
+      )
+      // Low Priority / No Data / 데이터 수집 필요
+      const isLowOrNoData = (
+        recLower.includes('low priority') ||
+        recLower.includes('no data') ||
+        recLower.includes('데이터 수집')
       )
 
-      // recommendation이 있으면(빈 문자열이 아니면) 의미있는 데이터 → 자동 추가 대상
+      // recommendation이 있으면(Low Priority/No Data 제외) 의미있는 데이터
       const hasRecommendation = recommendation.trim().length > 0
 
       // 자동 추가 대상 판별
+      // 최상위/OSINT/DMCA/신규위협/모니터링 — Low Priority/No Data/데이터 수집 필요 제외
       const shouldAutoAdd = (
-        (opts.autoAddTopTargets && isTopTarget) ||
-        (opts.autoAddOsintNeeded && (isOsintNeeded || hasRecommendation)) ||
+        (opts.autoAddTopTargets && (isTopTarget || isOsintNeeded)) ||
+        (opts.autoAddOsintNeeded && (isBlockTarget || isNewThreat || isMonitorTarget)) ||
+        (hasRecommendation && !isLowOrNoData) ||  // 유의미한 권고사항이 있으면 추가
         opts.syncAllIllegal
       )
 
@@ -179,6 +214,19 @@ export async function runSync(options?: {
           }
         }
         if (analysisResult.recommendation && existing.recommendation !== analysisResult.recommendation) {
+          // 권고사항 변경 시 타임라인에 기록
+          if (existing.recommendation && existing.recommendation !== analysisResult.recommendation) {
+            db.prepare(`
+              INSERT INTO timeline_events (id, entity_type, entity_id, event_type, title, description, event_date, source, importance)
+              VALUES (?, 'site', ?, 'recommendation_change', ?, ?, datetime('now'), 'Jobdori 동기화', ?)
+            `).run(
+              uuidv4(),
+              existing.id,
+              `권고사항 변경: ${existing.recommendation} → ${analysisResult.recommendation}`,
+              `${domain}의 Jobdori 권고사항이 변경되었습니다.`,
+              isTopTarget ? 'critical' : isOsintNeeded ? 'high' : 'normal',
+            )
+          }
           updates.recommendation = analysisResult.recommendation
           updates.priority = mapRecommendationToPriority(analysisResult.recommendation)
           changed = true

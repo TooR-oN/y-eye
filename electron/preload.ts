@@ -117,6 +117,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     envPath: () => ipcRenderer.invoke('jobdori:env-path'),
   },
 
+  // App Settings (Generic)
+  settings: {
+    get: (key: string) => ipcRenderer.invoke('settings:get', key),
+    set: (key: string, value: string) => ipcRenderer.invoke('settings:set', key, value),
+  },
+
   // AI Insights (Phase 4)
   aiInsights: {
     list: (filters?: any) => ipcRenderer.invoke('db:ai-insights:list', filters),

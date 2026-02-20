@@ -16,6 +16,7 @@ export interface JobdoriSite {
   site_status: string | null
   new_url: string | null
   distribution_channel: string | null
+  language: string | null
   created_at: string
 }
 
@@ -28,9 +29,18 @@ export interface JobdoriDomainAnalysisResult {
   total_visits: number | null
   unique_visitors: number | null
   global_rank: number | null
-  recommendation: string | null
-  site_type: string | null
+  bounce_rate: number | null
+  discovered: number | null
+  visits_change_mom: number | null
+  rank_change_mom: number | null
+  size_score: number | null
+  growth_score: number | null
   type_score: number | null
+  site_type: string | null
+  traffic_analysis: string | null
+  traffic_analysis_detail: string | null
+  recommendation: string | null
+  recommendation_detail: string | null
   created_at: string
 }
 
@@ -120,7 +130,7 @@ export async function testConnection(): Promise<{ success: boolean; message: str
 export async function fetchIllegalSites(): Promise<JobdoriSite[]> {
   if (!pool) throw new Error('DB not connected')
   const res = await pool.query(
-    `SELECT domain, type, site_type, site_status, new_url, distribution_channel, created_at
+    `SELECT domain, type, site_type, site_status, new_url, distribution_channel, language, created_at
      FROM sites WHERE type = 'illegal' ORDER BY created_at DESC`
   )
   return res.rows
@@ -131,9 +141,11 @@ export async function fetchIllegalSites(): Promise<JobdoriSite[]> {
  */
 export async function fetchLatestAnalysisReport(): Promise<JobdoriDomainAnalysisReport | null> {
   if (!pool) throw new Error('DB not connected')
+  // CRITICAL: status='completed' 필터 필수! pending/failed 리포트 제외
   const res = await pool.query(
-    `SELECT * FROM domain_analysis_reports ORDER BY analysis_month DESC LIMIT 1`
+    `SELECT * FROM domain_analysis_reports WHERE status = 'completed' ORDER BY analysis_month DESC LIMIT 1`
   )
+  console.log(`📊 최신 완료 리포트: ${res.rows.length > 0 ? `id=${res.rows[0].id}, month=${res.rows[0].analysis_month}` : 'none'}`)
   return res.rows[0] || null
 }
 
@@ -220,10 +232,24 @@ export interface JobdoriSyncData {
 export async function fetchSyncData(): Promise<JobdoriSyncData> {
   if (!pool) throw new Error('DB not connected')
 
+  // 먼저 테이블 존재 여부 확인
+  try {
+    const tableCheck = await pool.query(
+      `SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename`
+    )
+    const tables = tableCheck.rows.map((r: any) => r.tablename)
+    console.log(`📋 Jobdori DB 테이블 목록 (${tables.length}개):`, tables.join(', '))
+  } catch (err: any) {
+    console.error('❌ 테이블 조회 실패:', err.message)
+  }
+
   const [illegalSites, latestReport, siteNotes] = await Promise.all([
     fetchIllegalSites(),
     fetchLatestAnalysisReport(),
-    fetchAllSiteNotes(),
+    fetchAllSiteNotes().catch(err => {
+      console.log(`⚠️ site_notes 조회 실패 (테이블 없을 수 있음): ${err.message}`)
+      return [] as JobdoriSiteNote[]
+    }),
   ])
 
   let analysisResults: JobdoriDomainAnalysisResult[] = []
@@ -233,6 +259,16 @@ export async function fetchSyncData(): Promise<JobdoriSyncData> {
       [latestReport.id]
     )
     analysisResults = res.rows
+    console.log(`📊 분석결과: ${analysisResults.length}개 도메인 (리포트 ${latestReport.analysis_month})`)
+    // 디버그: recommendation 값 분포
+    const recCounts = new Map<string, number>()
+    analysisResults.forEach(r => {
+      const key = r.recommendation || '(null)'
+      recCounts.set(key, (recCounts.get(key) || 0) + 1)
+    })
+    console.log(`📊 recommendation 분포:`, Object.fromEntries(recCounts))
+  } else {
+    console.log(`⚠️ 완료된 분석 리포트 없음 — 분석결과 동기화 건너뜀`)
   }
 
   return { illegalSites, analysisResults, latestReport, siteNotes }

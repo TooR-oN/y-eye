@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ObsidianConfig } from '@/shared/types'
 
 export default function SettingsPage() {
+  const navigate = useNavigate()
   const [appInfo, setAppInfo] = useState<{ version: string; name: string; platform: string; userData: string } | null>(null)
   const [obsidianConfig, setObsidianConfig] = useState<ObsidianConfig>({
     vaultPath: '',
@@ -20,6 +22,11 @@ export default function SettingsPage() {
   const [vaultValid, setVaultValid] = useState<boolean | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
 
+  // AI Settings
+  const [aiEngine, setAiEngine] = useState('mock')
+  const [aiApiKey, setAiApiKey] = useState('')
+  const [aiModel, setAiModel] = useState('')
+
   useEffect(() => {
     loadSettings()
   }, [])
@@ -33,6 +40,17 @@ export default function SettingsPage() {
       const config = await window.electronAPI.obsidian.getConfig()
       setObsidianConfig(config)
       if (config.vaultPath) setVaultValid(true) // assume valid if set
+
+      // Load AI settings
+      if (window.electronAPI?.settings) {
+        const aiSettings = await window.electronAPI.settings.get('ai_config')
+        if (aiSettings) {
+          const parsed = JSON.parse(aiSettings)
+          setAiEngine(parsed.engine || 'mock')
+          setAiApiKey(parsed.apiKey || '')
+          setAiModel(parsed.model || '')
+        }
+      }
     } catch (err) {
       console.error('Failed to load settings:', err)
     } finally {
@@ -44,6 +62,16 @@ export default function SettingsPage() {
     setSaving(true)
     try {
       await window.electronAPI.obsidian.saveConfig(obsidianConfig)
+
+      // Save AI settings
+      if (window.electronAPI?.settings) {
+        await window.electronAPI.settings.set('ai_config', JSON.stringify({
+          engine: aiEngine,
+          apiKey: aiApiKey,
+          model: aiModel,
+        }))
+      }
+
       setSaved(true)
       if (obsidianConfig.vaultPath) setVaultValid(true)
       setTimeout(() => setSaved(false), 2000)
@@ -273,27 +301,20 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Jobdori DB Connection */}
-      <div className="card space-y-4">
+      {/* Jobdori DB Connection — Link to Sync Page */}
+      <div className="card space-y-3">
         <h2 className="text-sm font-semibold text-dark-200 flex items-center gap-2">
           <span>🔄</span> Jobdori DB 연결
         </h2>
         <p className="text-xs text-dark-500">
-          Jobdori의 Neon PostgreSQL 데이터베이스에 읽기 전용으로 연결합니다.
-          Jobdori 동기화 페이지에서 직접 관리할 수 있습니다.
+          Jobdori의 Neon PostgreSQL 데이터베이스 연결 및 동기화는 전용 페이지에서 관리합니다.
         </p>
-        <div>
-          <label className="block text-xs font-medium text-dark-400 mb-1.5">DATABASE_URL</label>
-          <input
-            type="password"
-            className="input"
-            placeholder="postgresql://user:password@host/database"
-            disabled
-          />
-        </div>
-        <p className="text-[10px] text-dark-500">
-          💡 Jobdori 동기화 페이지에서 DATABASE_URL을 설정하세요.
-        </p>
+        <button
+          onClick={() => navigate('/jobdori')}
+          className="btn-secondary btn-sm"
+        >
+          Jobdori 동기화 페이지로 이동 →
+        </button>
       </div>
 
       {/* AI Settings */}
@@ -304,24 +325,79 @@ export default function SettingsPage() {
         <p className="text-xs text-dark-500">
           AI 모델을 설정하여 OSINT 데이터 분석을 자동화합니다.
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-3">
           <div>
             <label className="block text-xs font-medium text-dark-400 mb-1.5">AI 엔진</label>
-            <select className="select" disabled>
-              <option>Mock (내장)</option>
-              <option>Claude API</option>
-              <option>OpenAI API</option>
-              <option>Ollama (로컬)</option>
+            <select
+              className="select"
+              value={aiEngine}
+              onChange={e => {
+                setAiEngine(e.target.value)
+                setAiModel('') // reset model when engine changes
+              }}
+            >
+              <option value="mock">Mock (내장 분석)</option>
+              <option value="claude">Claude API</option>
+              <option value="openai">OpenAI API</option>
+              <option value="ollama">Ollama (로컬)</option>
             </select>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-dark-400 mb-1.5">API Key</label>
-            <input type="password" className="input" placeholder="sk-..." disabled />
-          </div>
+          {aiEngine !== 'mock' && aiEngine !== 'ollama' && (
+            <div>
+              <label className="block text-xs font-medium text-dark-400 mb-1.5">API Key</label>
+              <input
+                type="password"
+                className="input"
+                value={aiApiKey}
+                onChange={e => setAiApiKey(e.target.value)}
+                placeholder={aiEngine === 'claude' ? 'sk-ant-...' : 'sk-...'}
+              />
+            </div>
+          )}
+          {aiEngine !== 'mock' && (
+            <div>
+              <label className="block text-xs font-medium text-dark-400 mb-1.5">모델</label>
+              <select
+                className="select"
+                value={aiModel}
+                onChange={e => setAiModel(e.target.value)}
+              >
+                {aiEngine === 'claude' && (
+                  <>
+                    <option value="">모델 선택...</option>
+                    <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
+                    <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku</option>
+                  </>
+                )}
+                {aiEngine === 'openai' && (
+                  <>
+                    <option value="">모델 선택...</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                  </>
+                )}
+                {aiEngine === 'ollama' && (
+                  <>
+                    <option value="">모델 선택...</option>
+                    <option value="llama3.1">Llama 3.1</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="gemma2">Gemma 2</option>
+                  </>
+                )}
+              </select>
+            </div>
+          )}
+          {aiEngine === 'ollama' && (
+            <p className="text-[10px] text-dark-500">
+              💡 Ollama가 로컬에서 실행 중이어야 합니다. (기본: http://localhost:11434)
+            </p>
+          )}
+          {aiEngine === 'mock' && (
+            <p className="text-[10px] text-dark-500">
+              💡 Mock 모드: 관계 분석 및 패턴 기반의 기본 인사이트를 제공합니다.
+            </p>
+          )}
         </div>
-        <p className="text-[10px] text-dark-500">
-          💡 현재 Mock 분석 모드로 동작합니다. 실제 AI API 연동은 추후 개발 예정입니다.
-        </p>
       </div>
 
       {/* Database Management */}

@@ -348,6 +348,10 @@ export interface ElectronAPI {
   app: {
     info: () => Promise<{ version: string; name: string; platform: string; userData: string }>
   }
+  settings: {
+    get: (key: string) => Promise<string | null>
+    set: (key: string, value: string) => Promise<{ success: boolean }>
+  }
   data: {
     exportAll: () => Promise<{ success: boolean; json: string; fileName: string }>
     importAll: (json: string) => Promise<{ success: boolean; counts: { sites: number; persons: number; osint: number; timeline: number } }>
