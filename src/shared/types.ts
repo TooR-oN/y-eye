@@ -13,6 +13,7 @@ export interface Site {
   traffic_rank: string | null
   unique_visitors: string | null
   investigation_status: 'pending' | 'in_progress' | 'completed' | 'on_hold'
+  action_status: string | null
   parent_site_id: string | null
   notes: string | null
   created_at: string
@@ -254,8 +255,9 @@ export const PERSON_ROLES = [
   { value: 'owner', label: '소유자' },
   { value: 'operator', label: '운영자' },
   { value: 'developer', label: '개발자' },
-  { value: 'uploader', label: '업로더' },
+  { value: 'discord_staff', label: '디스코드 스탭' },
   { value: 'suspected', label: '추정' },
+  { value: 'custom', label: '직접 입력' },
 ] as const
 
 export const CONFIDENCE_LEVELS = [
@@ -264,6 +266,14 @@ export const CONFIDENCE_LEVELS = [
   { value: 'medium', label: '보통', color: 'text-yellow-400' },
   { value: 'low', label: '낮음', color: 'text-orange-400' },
   { value: 'suspected', label: '추정', color: 'text-gray-400' },
+] as const
+
+export const ACTION_STATUS = [
+  { value: 'pending', label: '대기', color: 'text-gray-400', bg: 'bg-gray-500/10' },
+  { value: 'dmca_sent', label: 'DMCA 발송', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+  { value: 'cnd_sent', label: 'C&D 발송', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
+  { value: 'legal_action', label: '법적 조치 추진', color: 'text-orange-400', bg: 'bg-orange-500/10' },
+  { value: 'closed', label: '폐쇄', color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
 ] as const
 
 // Electron API type for window

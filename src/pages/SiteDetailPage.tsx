@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Site, Person, OsintEntry, PersonSiteRelation, TimelineEvent, DomainHistory, MarkdownExportResult, EvidenceFile, OsintLink } from '@/shared/types'
-import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS } from '@/shared/types'
+import { OSINT_CATEGORIES, SITE_TYPES, PERSON_ROLES, CONFIDENCE_LEVELS, ACTION_STATUS } from '@/shared/types'
 import MarkdownPreviewModal from '@/components/MarkdownPreviewModal'
 import { useAutoSync } from '@/hooks/useAutoSync'
 import EvidenceUploadSection from '@/components/EvidenceUploadSection'
@@ -20,7 +20,7 @@ export default function SiteDetailPage() {
   const [linkedOsint, setLinkedOsint] = useState<(OsintLink & { entry: OsintEntry })[]>([])
   const [osintLinks, setOsintLinks] = useState<Map<string, OsintLink[]>>(new Map()) // entryId → links
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'persons' | 'timeline' | 'history'>('osint')
+  const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'persons' | 'actions' | 'timeline' | 'history'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
   const [showAddPerson, setShowAddPerson] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -111,6 +111,7 @@ export default function SiteDetailPage() {
     { key: 'osint', label: '인프라 정보', count: osintEntries.length },
     { key: 'evidence', label: '증거 파일', count: evidenceFiles.length },
     { key: 'persons', label: '연관 인물', count: relatedPersons.length },
+    { key: 'actions', label: '조치 현황', count: 0 },
     { key: 'timeline', label: '타임라인', count: timeline.length },
     { key: 'history', label: '도메인 이력', count: domainHistory.length },
   ] as const
@@ -206,6 +207,13 @@ export default function SiteDetailPage() {
                 <option value="in_progress">진행중</option>
                 <option value="completed">완료</option>
                 <option value="on_hold">보류</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-dark-400 mb-1">조치 현황</label>
+              <select value={editForm.action_status || ''} onChange={e => setEditForm({...editForm, action_status: e.target.value || null})} className="select">
+                <option value="">미설정</option>
+                {ACTION_STATUS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
               </select>
             </div>
           </div>
@@ -358,6 +366,61 @@ export default function SiteDetailPage() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'actions' && (
+        <div className="space-y-4">
+          <h3 className="text-sm font-medium text-dark-300">조치 현황</h3>
+          <div className="card">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-sm text-dark-400">현재 상태:</span>
+              {site.action_status ? (
+                (() => {
+                  const action = ACTION_STATUS.find(a => a.value === site.action_status)
+                  return (
+                    <span className={`text-sm font-semibold px-3 py-1 rounded-lg ${action?.bg || 'bg-dark-800'} ${action?.color || 'text-dark-300'}`}>
+                      {action?.label || site.action_status}
+                    </span>
+                  )
+                })()
+              ) : (
+                <span className="text-sm text-dark-600 italic">미설정</span>
+              )}
+            </div>
+
+            {/* 조치 단계 타임라인 */}
+            <div className="space-y-3">
+              {ACTION_STATUS.map((action, idx) => {
+                const currentIdx = ACTION_STATUS.findIndex(a => a.value === site.action_status)
+                const isCompleted = currentIdx >= 0 && idx <= currentIdx
+                const isCurrent = site.action_status === action.value
+                return (
+                  <div key={action.value} className="flex items-center gap-3">
+                    <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
+                      isCompleted ? 'bg-yeye-600/30 text-yeye-400 border border-yeye-500/40' : 'bg-dark-800 text-dark-600 border border-dark-700/40'
+                    }`}>
+                      {isCompleted ? '✓' : idx + 1}
+                    </div>
+                    <div className={`flex-1 py-2 px-3 rounded-lg ${
+                      isCurrent ? 'bg-dark-800/60 border border-dark-600/40' : ''
+                    }`}>
+                      <p className={`text-sm ${isCompleted ? action.color : 'text-dark-600'} ${isCurrent ? 'font-semibold' : ''}`}>
+                        {action.label}
+                      </p>
+                    </div>
+                    {isCurrent && <span className="text-[10px] text-yeye-400 bg-yeye-600/15 px-2 py-0.5 rounded">현재</span>}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-dark-700/40">
+              <p className="text-xs text-dark-500">
+                조치 현황을 변경하려면 상단의 <button onClick={() => setEditing(true)} className="text-yeye-400 hover:underline">편집</button> 버튼을 눌러 '조치 현황' 항목을 수정하세요.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -710,6 +773,7 @@ function AddPersonRelationModal({ siteId, existingPersonIds, onClose, onCreated 
   const [newAlias, setNewAlias] = useState('')
   const [newRiskLevel, setNewRiskLevel] = useState('medium')
   const [role, setRole] = useState('')
+  const [customRole, setCustomRole] = useState('')
   const [confidence, setConfidence] = useState('medium')
   const [evidence, setEvidence] = useState('')
   const [saving, setSaving] = useState(false)
@@ -745,7 +809,7 @@ function AddPersonRelationModal({ siteId, existingPersonIds, onClose, onCreated 
         id: uuidv4(),
         person_id: personId,
         site_id: siteId,
-        role: role || null,
+        role: role === 'custom' ? (customRole.trim() || null) : (role || null),
         confidence,
         evidence: evidence.trim() || null,
       })
@@ -825,7 +889,7 @@ function AddPersonRelationModal({ siteId, existingPersonIds, onClose, onCreated 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-dark-400 mb-1.5">역할</label>
-                <select value={role} onChange={e => setRole(e.target.value)} className="select">
+                <select value={role} onChange={e => { setRole(e.target.value); if (e.target.value !== 'custom') setCustomRole('') }} className="select">
                   <option value="">미지정</option>
                   {PERSON_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
@@ -837,6 +901,12 @@ function AddPersonRelationModal({ siteId, existingPersonIds, onClose, onCreated 
                 </select>
               </div>
             </div>
+            {role === 'custom' && (
+              <div>
+                <label className="block text-xs font-medium text-dark-400 mb-1.5">역할 직접 입력</label>
+                <input type="text" value={customRole} onChange={e => setCustomRole(e.target.value)} className="input" placeholder="예: 자금 담당, 서버 관리..." autoFocus />
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-dark-400 mb-1.5">근거 / 메모</label>
               <textarea

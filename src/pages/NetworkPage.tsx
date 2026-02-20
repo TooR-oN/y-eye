@@ -14,6 +14,7 @@ interface GraphNode {
   y: number
   vx: number
   vy: number
+  pinned?: boolean
   risk?: string
   priority?: string
   status?: string
@@ -70,8 +71,9 @@ function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, h
   const spreadRadius = Math.min(width, height) * 0.4
   const iterations = Math.max(150, nodes.length * 25)
 
-  // Initialize positions in a circle with wider spread
+  // Initialize positions — skip pinned nodes
   nodes.forEach((node, i) => {
+    if (node.pinned) return
     const angle = (2 * Math.PI * i) / nodes.length + (Math.random() - 0.5) * 0.3
     node.x = cx + spreadRadius * Math.cos(angle)
     node.y = cy + spreadRadius * Math.sin(angle)
@@ -132,8 +134,9 @@ function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, h
       node.vy += (cy - node.y) * centerPull
     }
 
-    // Apply velocity with damping
+    // Apply velocity with damping — skip pinned
     for (const node of nodes) {
+      if (node.pinned) continue
       node.x += node.vx * 0.7
       node.y += node.vy * 0.7
       node.vx *= 0.6
@@ -288,13 +291,14 @@ export default function NetworkPage() {
           if (Math.abs(prev.width - newW) > 30 || Math.abs(prev.height - newH) > 30) {
             clearTimeout(resizeTimer)
             resizeTimer = setTimeout(() => {
-              // Re-run force layout with new dimensions
-              if (nodes.length > 0) {
-                const newNodes = nodes.map(n => ({ ...n }))
+              // Re-run force layout — pinned nodes stay in place
+              setNodes(prev => {
+                if (prev.length === 0) return prev
+                const newNodes = prev.map(n => ({ ...n }))
                 runForceLayout(newNodes, edges, newW, newH)
-                setNodes(newNodes)
-              }
-            }, 200)
+                return newNodes
+              })
+            }, 300)
           }
           return { width: newW, height: newH }
         })
@@ -328,6 +332,12 @@ export default function NetworkPage() {
   }
 
   function handleMouseUp() {
+    if (draggingNode) {
+      // Pin the dragged node so re-layout won't move it
+      setNodes(prev => prev.map(n =>
+        n.id === draggingNode ? { ...n, pinned: true } : n
+      ))
+    }
     setDraggingNode(null)
   }
 
