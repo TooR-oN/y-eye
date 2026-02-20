@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   evidence: {
     list: (filters: any) => ipcRenderer.invoke('db:evidence:list', filters),
     create: (file: any) => ipcRenderer.invoke('db:evidence:create', file),
+    delete: (id: string) => ipcRenderer.invoke('db:evidence:delete', id),
   },
 
   // Timeline Events
@@ -82,9 +83,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stats: () => ipcRenderer.invoke('db:dashboard:stats'),
   },
 
-  // Obsidian
+  // Obsidian Integration (Phase 5)
   obsidian: {
     open: (vaultPath: string, filePath: string) => ipcRenderer.invoke('obsidian:open', vaultPath, filePath),
+    getConfig: () => ipcRenderer.invoke('obsidian:getConfig'),
+    saveConfig: (config: any) => ipcRenderer.invoke('obsidian:saveConfig', config),
+    exportSite: (siteId: string) => ipcRenderer.invoke('obsidian:exportSite', siteId),
+    exportPerson: (personId: string) => ipcRenderer.invoke('obsidian:exportPerson', personId),
+    exportDomainChange: (siteId: string, oldDomain: string, newDomain: string) => ipcRenderer.invoke('obsidian:exportDomainChange', siteId, oldDomain, newDomain),
   },
 
   // App
@@ -92,7 +98,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     info: () => ipcRenderer.invoke('app:info'),
   },
 
-  // Jobdori
+  // Data Export/Import/Reset (Phase 6)
+  data: {
+    exportAll: () => ipcRenderer.invoke('data:export-all'),
+    importAll: (json: string) => ipcRenderer.invoke('data:import-all', json),
+    resetAll: () => ipcRenderer.invoke('data:reset-all'),
+  },
+
+  // Jobdori Integration (Phase 2)
   jobdori: {
     connect: (databaseUrl?: string) => ipcRenderer.invoke('jobdori:connect', databaseUrl),
     status: () => ipcRenderer.invoke('jobdori:status'),
@@ -102,5 +115,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     search: (searchTerm: string) => ipcRenderer.invoke('jobdori:search', searchTerm),
     sitesByRecommendation: (recommendation?: string) => ipcRenderer.invoke('jobdori:sites-by-recommendation', recommendation),
     envPath: () => ipcRenderer.invoke('jobdori:env-path'),
+  },
+
+  // AI Insights (Phase 4)
+  aiInsights: {
+    list: (filters?: any) => ipcRenderer.invoke('db:ai-insights:list', filters),
+    analyze: (entityType: string, entityId: string) => ipcRenderer.invoke('db:ai-insights:analyze', entityType, entityId),
+    updateStatus: (id: string, status: string) => ipcRenderer.invoke('db:ai-insights:update-status', id, status),
+  },
+
+  // OSINT Links (Phase 7)
+  osintLinks: {
+    list: (filters: any) => ipcRenderer.invoke('db:osint-links:list', filters),
+    create: (link: any) => ipcRenderer.invoke('db:osint-links:create', link),
+    delete: (id: string) => ipcRenderer.invoke('db:osint-links:delete', id),
+    listLinkedTo: (targetType: string, targetId: string) => ipcRenderer.invoke('db:osint-links:list-linked-to', targetType, targetId),
+    suggestTargets: (entityType: string, entityId: string) => ipcRenderer.invoke('db:osint-links:suggest-targets', entityType, entityId),
   },
 })

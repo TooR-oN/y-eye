@@ -58,6 +58,7 @@ function createTables(db: Database.Database): void {
       traffic_rank TEXT,
       unique_visitors TEXT,
       investigation_status TEXT DEFAULT 'pending',
+      action_status TEXT,
       parent_site_id TEXT,
       notes TEXT,
       created_at DATETIME DEFAULT (datetime('now')),
@@ -260,6 +261,20 @@ function createTables(db: Database.Database): void {
     );
 
     -- ============================================
+    -- OSINT 연결 링크 (Phase 7)
+    -- ============================================
+    CREATE TABLE IF NOT EXISTS osint_links (
+      id TEXT PRIMARY KEY,
+      osint_entry_id TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT (datetime('now')),
+      FOREIGN KEY (osint_entry_id) REFERENCES osint_entries(id) ON DELETE CASCADE
+    );
+
+    -- ============================================
     -- 인덱스
     -- ============================================
     CREATE INDEX IF NOT EXISTS idx_sites_domain ON sites(domain);
@@ -277,5 +292,21 @@ function createTables(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_timeline_entity ON timeline_events(entity_type, entity_id);
     CREATE INDEX IF NOT EXISTS idx_timeline_date ON timeline_events(event_date DESC);
     CREATE INDEX IF NOT EXISTS idx_ai_insights_status ON ai_insights(status);
+    CREATE INDEX IF NOT EXISTS idx_osint_links_entry ON osint_links(osint_entry_id);
+    CREATE INDEX IF NOT EXISTS idx_osint_links_source ON osint_links(source_type, source_id);
+    CREATE INDEX IF NOT EXISTS idx_osint_links_target ON osint_links(target_type, target_id);
   `)
+
+  // 마이그레이션: 기존 DB에 누락된 컬럼 추가
+  runMigrations(db)
+}
+
+function runMigrations(db: Database.Database): void {
+  // action_status 컬럼 추가 (v0.5.1)
+  try {
+    db.prepare("SELECT action_status FROM sites LIMIT 1").get()
+  } catch {
+    console.log('📦 Migration: Adding action_status column to sites')
+    db.exec("ALTER TABLE sites ADD COLUMN action_status TEXT")
+  }
 }
