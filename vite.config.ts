@@ -1,9 +1,22 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { builtinModules } from 'module'
 
 // Detect if running in web-only preview mode (no Electron)
 const isWebPreview = process.env.WEB_PREVIEW === '1' || !process.env.ELECTRON
+
+// Node.js built-in modules + Electron + native modules must be external
+// for the Electron main process bundle to work correctly
+const electronExternals = [
+  'electron',
+  'better-sqlite3',
+  'pg',
+  'pg-native',
+  'pg-pool',
+  ...builtinModules,
+  ...builtinModules.map(m => `node:${m}`),
+]
 
 export default defineConfig(({ mode }) => {
   const plugins: any[] = [react()]
@@ -20,8 +33,9 @@ export default defineConfig(({ mode }) => {
             vite: {
               build: {
                 outDir: 'dist-electron',
+                minify: false,
                 rollupOptions: {
-                  external: ['better-sqlite3']
+                  external: electronExternals
                 }
               }
             }
@@ -34,8 +48,9 @@ export default defineConfig(({ mode }) => {
             vite: {
               build: {
                 outDir: 'dist-electron',
+                minify: false,
                 rollupOptions: {
-                  external: ['better-sqlite3']
+                  external: electronExternals
                 }
               }
             }
