@@ -22,6 +22,7 @@ export default function SiteDetailPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'osint' | 'evidence' | 'persons' | 'timeline' | 'history'>('osint')
   const [showAddOsint, setShowAddOsint] = useState(false)
+  const [showAddPerson, setShowAddPerson] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Partial<Site>>({})
   const [exporting, setExporting] = useState(false)
@@ -337,15 +338,23 @@ export default function SiteDetailPage() {
 
       {activeTab === 'persons' && (
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-dark-300">연관 인물</h3>
+          <div className="flex justify-between items-center">
+            <h3 className="text-sm font-medium text-dark-300">연관 인물</h3>
+            <button onClick={() => setShowAddPerson(true)} className="btn-primary btn-sm">＋ 인물 연결</button>
+          </div>
           {relatedPersons.length === 0 ? (
             <div className="card text-center py-8">
               <p className="text-dark-500 text-sm">연결된 인물이 없습니다</p>
+              <button onClick={() => setShowAddPerson(true)} className="btn-primary btn-sm mt-3">＋ 첫 인물 연결</button>
             </div>
           ) : (
             <div className="space-y-4">
               {relatedPersons.map(rel => (
-                <PersonDetailCard key={rel.id} relation={rel} navigate={navigate} />
+                <PersonDetailCard key={rel.id} relation={rel} navigate={navigate} onUnlink={async () => {
+                  if (!confirm('이 인물 연결을 해제하시겠습니까?')) return
+                  await window.electronAPI.personSiteRelations.delete(rel.id)
+                  loadData()
+                }} />
               ))}
             </div>
           )}
@@ -423,6 +432,11 @@ export default function SiteDetailPage() {
       {/* Add OSINT Modal */}
       {showAddOsint && id && (
         <AddOsintModal entityType="site" entityId={id} onClose={() => setShowAddOsint(false)} onCreated={() => { setShowAddOsint(false); loadData() }} />
+      )}
+
+      {/* Add Person Relation Modal */}
+      {showAddPerson && id && (
+        <AddPersonRelationModal siteId={id} existingPersonIds={relatedPersons.map(r => r.person_id)} onClose={() => setShowAddPerson(false)} onCreated={() => { setShowAddPerson(false); loadData() }} />
       )}
 
       {/* Markdown Preview Modal */}
@@ -519,7 +533,7 @@ const RISK_COLORS: Record<string, string> = {
 const RISK_LABELS: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
 const STATUS_LABELS: Record<string, string> = { active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인' }
 
-function PersonDetailCard({ relation, navigate }: { relation: PersonSiteRelation; navigate: (path: string) => void }) {
+function PersonDetailCard({ relation, navigate, onUnlink }: { relation: PersonSiteRelation; navigate: (path: string) => void; onUnlink: () => void }) {
   const [person, setPerson] = useState<Person | null>(null)
   const [personOsint, setPersonOsint] = useState<OsintEntry[]>([])
   const [personSites, setPersonSites] = useState<PersonSiteRelation[]>([])
@@ -589,6 +603,13 @@ function PersonDetailCard({ relation, navigate }: { relation: PersonSiteRelation
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            className="text-dark-600 hover:text-red-400 text-xs transition-colors"
+            onClick={(e) => { e.stopPropagation(); onUnlink() }}
+            title="연결 해제"
+          >
+            연결 해제
+          </button>
           <button
             className="btn-ghost btn-sm text-xs"
             onClick={(e) => { e.stopPropagation(); navigate(`/persons/${relation.person_id}`) }}
@@ -672,6 +693,174 @@ function PersonDetailCard({ relation, navigate }: { relation: PersonSiteRelation
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ============================================
+// Add Person Relation Modal (인물 연결 추가)
+// ============================================
+
+function AddPersonRelationModal({ siteId, existingPersonIds, onClose, onCreated }: {
+  siteId: string; existingPersonIds: string[]; onClose: () => void; onCreated: () => void
+}) {
+  const [allPersons, setAllPersons] = useState<Person[]>([])
+  const [selectedPersonId, setSelectedPersonId] = useState('')
+  const [createNew, setCreateNew] = useState(false)
+  const [newAlias, setNewAlias] = useState('')
+  const [newRiskLevel, setNewRiskLevel] = useState('medium')
+  const [role, setRole] = useState('')
+  const [confidence, setConfidence] = useState('medium')
+  const [evidence, setEvidence] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    window.electronAPI.persons.list().then(persons => {
+      setAllPersons(persons.filter(p => !existingPersonIds.includes(p.id)))
+    })
+  }, [])
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      let personId = selectedPersonId
+
+      // 새 인물 생성
+      if (createNew) {
+        if (!newAlias.trim()) return
+        const newPerson = await window.electronAPI.persons.create({
+          id: uuidv4(),
+          alias: newAlias.trim(),
+          risk_level: newRiskLevel as any,
+          status: 'active',
+        })
+        personId = newPerson.id
+      }
+
+      if (!personId) return
+
+      // 관계 생성
+      await window.electronAPI.personSiteRelations.create({
+        id: uuidv4(),
+        person_id: personId,
+        site_id: siteId,
+        role: role || null,
+        confidence,
+        evidence: evidence.trim() || null,
+      })
+
+      onCreated()
+    } catch (err) {
+      console.error('Failed to create person relation:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-dark-900 border border-dark-700/50 rounded-2xl w-full max-w-md p-6 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-bold text-dark-50 mb-4">인물 연결 추가</h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+
+          {/* 기존 인물 선택 or 새로 만들기 토글 */}
+          <div className="flex gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setCreateNew(false)}
+              className={`flex-1 py-2 text-sm rounded-lg transition-all ${
+                !createNew ? 'bg-yeye-600/20 text-yeye-400 border border-yeye-500/30' : 'bg-dark-800/50 text-dark-400 border border-dark-700/30'
+              }`}
+            >
+              기존 인물 선택
+            </button>
+            <button
+              type="button"
+              onClick={() => setCreateNew(true)}
+              className={`flex-1 py-2 text-sm rounded-lg transition-all ${
+                createNew ? 'bg-yeye-600/20 text-yeye-400 border border-yeye-500/30' : 'bg-dark-800/50 text-dark-400 border border-dark-700/30'
+              }`}
+            >
+              새 인물 만들기
+            </button>
+          </div>
+
+          {!createNew ? (
+            <div>
+              <label className="block text-xs font-medium text-dark-400 mb-1.5">인물 선택</label>
+              {allPersons.length === 0 ? (
+                <p className="text-xs text-dark-600 italic py-2">연결할 수 있는 인물이 없습니다. '새 인물 만들기'를 선택하세요.</p>
+              ) : (
+                <select value={selectedPersonId} onChange={e => setSelectedPersonId(e.target.value)} className="select">
+                  <option value="">인물을 선택하세요</option>
+                  {allPersons.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.alias || p.real_name || '미확인'} {p.real_name && p.alias ? `(${p.real_name})` : ''}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-dark-400 mb-1.5">별칭 *</label>
+                <input type="text" value={newAlias} onChange={e => setNewAlias(e.target.value)} className="input" placeholder="예: DarkWebtoon" autoFocus />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-400 mb-1.5">위험도</label>
+                <select value={newRiskLevel} onChange={e => setNewRiskLevel(e.target.value)} className="select">
+                  <option value="critical">긴급</option>
+                  <option value="high">높음</option>
+                  <option value="medium">보통</option>
+                  <option value="low">낮음</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-dark-700/40 pt-4 space-y-3">
+            <p className="text-xs font-medium text-dark-400">관계 정보</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-dark-400 mb-1.5">역할</label>
+                <select value={role} onChange={e => setRole(e.target.value)} className="select">
+                  <option value="">미지정</option>
+                  {PERSON_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-dark-400 mb-1.5">신뢰도</label>
+                <select value={confidence} onChange={e => setConfidence(e.target.value)} className="select">
+                  {CONFIDENCE_LEVELS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-dark-400 mb-1.5">근거 / 메모</label>
+              <textarea
+                value={evidence}
+                onChange={e => setEvidence(e.target.value)}
+                className="textarea"
+                rows={3}
+                placeholder="예: WHOIS 이메일 유사성, 운영+자금 담당 겸임 추정..."
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button type="button" onClick={onClose} className="btn-secondary flex-1">취소</button>
+            <button
+              type="submit"
+              disabled={saving || (!createNew && !selectedPersonId) || (createNew && !newAlias.trim())}
+              className="btn-primary flex-1"
+            >
+              {saving ? '추가 중...' : '연결'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

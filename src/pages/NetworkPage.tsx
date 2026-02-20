@@ -60,34 +60,44 @@ const CONFIDENCE_OPACITY: Record<string, number> = {
 // ============================================
 // Force-directed layout (simplified)
 // ============================================
-function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, height: number, iterations = 100) {
-  // Initialize positions in a circle
+function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, height: number) {
+  if (nodes.length === 0) return nodes
+
+  const padding = 100
   const cx = width / 2
   const cy = height / 2
-  const radius = Math.min(width, height) * 0.3
+  // Spread initial positions across available space
+  const spreadRadius = Math.min(width, height) * 0.4
+  const iterations = Math.max(150, nodes.length * 25)
+
+  // Initialize positions in a circle with wider spread
   nodes.forEach((node, i) => {
-    const angle = (2 * Math.PI * i) / nodes.length
-    node.x = cx + radius * Math.cos(angle)
-    node.y = cy + radius * Math.sin(angle)
+    const angle = (2 * Math.PI * i) / nodes.length + (Math.random() - 0.5) * 0.3
+    node.x = cx + spreadRadius * Math.cos(angle)
+    node.y = cy + spreadRadius * Math.sin(angle)
     node.vx = 0
     node.vy = 0
   })
 
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
+  const minDist = Math.max(120, Math.min(width, height) / (nodes.length + 1) * 1.2)
 
   for (let iter = 0; iter < iterations; iter++) {
-    const alpha = 1 - iter / iterations
-    const repulsion = 8000 * alpha
-    const attraction = 0.005 * alpha
-    const centerPull = 0.01 * alpha
+    const alpha = Math.max(0.01, 1 - iter / iterations)
+    const repulsion = 20000 * alpha
+    const attraction = 0.003 * alpha
+    const centerPull = 0.003 * alpha
 
     // Repulsion between all nodes
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
-        const dx = nodes[j].x - nodes[i].x
-        const dy = nodes[j].y - nodes[i].y
+        let dx = nodes[j].x - nodes[i].x
+        let dy = nodes[j].y - nodes[i].y
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1)
-        const force = repulsion / (dist * dist)
+
+        // Stronger repulsion when too close
+        const effectiveRepulsion = dist < minDist ? repulsion * 2.5 : repulsion
+        const force = effectiveRepulsion / (dist * dist)
         const fx = (dx / dist) * force
         const fy = (dy / dist) * force
         nodes[i].vx -= fx
@@ -97,7 +107,7 @@ function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, h
       }
     }
 
-    // Attraction along edges
+    // Attraction along edges (desired distance ~minDist)
     for (const edge of edges) {
       const source = nodeMap.get(edge.source)
       const target = nodeMap.get(edge.target)
@@ -105,16 +115,18 @@ function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, h
       const dx = target.x - source.x
       const dy = target.y - source.y
       const dist = Math.sqrt(dx * dx + dy * dy)
-      const force = dist * attraction
-      const fx = dx * force
-      const fy = dy * force
+      // Only attract if distance > desired, repel if too close
+      const delta = dist - minDist * 0.8
+      const force = delta * attraction
+      const fx = (dx / Math.max(dist, 1)) * force
+      const fy = (dy / Math.max(dist, 1)) * force
       source.vx += fx
       source.vy += fy
       target.vx -= fx
       target.vy -= fy
     }
 
-    // Center pull
+    // Gentle center pull
     for (const node of nodes) {
       node.vx += (cx - node.x) * centerPull
       node.vy += (cy - node.y) * centerPull
@@ -122,14 +134,14 @@ function runForceLayout(nodes: GraphNode[], edges: GraphEdge[], width: number, h
 
     // Apply velocity with damping
     for (const node of nodes) {
-      node.x += node.vx * 0.8
-      node.y += node.vy * 0.8
-      node.vx *= 0.5
-      node.vy *= 0.5
+      node.x += node.vx * 0.7
+      node.y += node.vy * 0.7
+      node.vx *= 0.6
+      node.vy *= 0.6
 
-      // Keep within bounds
-      node.x = Math.max(80, Math.min(width - 80, node.x))
-      node.y = Math.max(80, Math.min(height - 80, node.y))
+      // Keep within padded bounds
+      node.x = Math.max(padding, Math.min(width - padding, node.x))
+      node.y = Math.max(padding, Math.min(height - padding, node.y))
     }
   }
 
@@ -149,7 +161,7 @@ export default function NetworkPage() {
   const [loading, setLoading] = useState(true)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
-  const [dimensions, setDimensions] = useState({ width: 900, height: 600 })
+  const [dimensions, setDimensions] = useState({ width: 900, height: 700 })
 
   // Drag state
   const [draggingNode, setDraggingNode] = useState<string | null>(null)
@@ -241,7 +253,7 @@ export default function NetworkPage() {
 
       // Run force layout
       const w = containerRef.current?.clientWidth || 900
-      const h = Math.max(500, (containerRef.current?.clientHeight || 600) - 20)
+      const h = Math.max(500, containerRef.current?.clientHeight || 700)
       setDimensions({ width: w, height: h })
       runForceLayout(finalNodes, finalEdges, w, h)
 
@@ -261,19 +273,36 @@ export default function NetworkPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Resize observer
+  // Resize observer — re-layout on resize
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
+    let resizeTimer: ReturnType<typeof setTimeout>
     const observer = new ResizeObserver(entries => {
       const { width, height } = entries[0].contentRect
       if (width > 0 && height > 0) {
-        setDimensions({ width, height: Math.max(500, height - 20) })
+        const newW = Math.floor(width)
+        const newH = Math.max(500, Math.floor(height))
+        setDimensions(prev => {
+          // Only re-layout if size changed significantly
+          if (Math.abs(prev.width - newW) > 30 || Math.abs(prev.height - newH) > 30) {
+            clearTimeout(resizeTimer)
+            resizeTimer = setTimeout(() => {
+              // Re-run force layout with new dimensions
+              if (nodes.length > 0) {
+                const newNodes = nodes.map(n => ({ ...n }))
+                runForceLayout(newNodes, edges, newW, newH)
+                setNodes(newNodes)
+              }
+            }, 200)
+          }
+          return { width: newW, height: newH }
+        })
       }
     })
     observer.observe(container)
-    return () => observer.disconnect()
-  }, [])
+    return () => { observer.disconnect(); clearTimeout(resizeTimer) }
+  }, [nodes.length, edges.length])
 
   // Drag handlers
   function handleMouseDown(nodeId: string, e: React.MouseEvent) {
@@ -346,7 +375,7 @@ export default function NetworkPage() {
   const highlightedNodes = hoveredNode ? getConnectedNodeIds(hoveredNode) : new Set<string>()
 
   return (
-    <div className="p-8 space-y-4 h-full flex flex-col">
+    <div className="p-4 space-y-3 h-[calc(100vh-2rem)] flex flex-col">
       {/* Header */}
       <div className="titlebar-drag pt-2">
         <div className="titlebar-no-drag flex items-start justify-between">
@@ -386,7 +415,7 @@ export default function NetworkPage() {
       {/* Graph + Detail Panel */}
       <div className="flex-1 flex gap-4 min-h-0">
         {/* SVG Graph */}
-        <div ref={containerRef} className="flex-1 card p-0 overflow-hidden relative">
+        <div ref={containerRef} className="flex-1 card p-0 overflow-hidden relative min-h-0">
           {nodes.length === 0 ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center space-y-3">
