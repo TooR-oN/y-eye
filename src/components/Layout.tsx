@@ -24,9 +24,7 @@ export default function Layout() {
         {/* Title bar drag area + Logo */}
         <div className="titlebar-drag pt-8 pb-4 px-4">
           <div className="titlebar-no-drag flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-yeye-500 to-yeye-700 flex items-center justify-center text-white font-bold text-sm shadow-lg shadow-yeye-500/20">
-              Y
-            </div>
+            <img src="/static/logo.png" alt="Y-EYE" className="w-9 h-9 rounded-xl shadow-lg shadow-yeye-500/20 object-cover" />
             <div>
               <h1 className="text-sm font-bold text-dark-50 tracking-tight">Y-EYE</h1>
               <p className="text-[10px] text-dark-500">OSINT Intelligence</p>
@@ -70,7 +68,7 @@ export default function Layout() {
             </NavLink>
           ))}
           <div className="px-3 pt-2">
-            <p className="text-[10px] text-dark-600">v0.3.0 — Phase 4</p>
+            <p className="text-[10px] text-dark-600">v0.6.1</p>
           </div>
         </div>
       </aside>

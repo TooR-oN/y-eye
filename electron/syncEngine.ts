@@ -28,13 +28,15 @@ export interface SyncResult {
   timestamp: string
 }
 
-// 권고사항 → priority 매핑
+// 권고사항 → priority 매핑 (확장)
 function mapRecommendationToPriority(rec: string | null): string {
   if (!rec) return 'low'
   const lower = rec.toLowerCase()
-  if (lower.includes('최상위') || lower.includes('top target')) return 'critical'
-  if (lower.includes('osint') || lower.includes('조사 필요')) return 'high'
-  if (lower.includes('모니터링') || lower.includes('monitoring')) return 'medium'
+  if (lower.includes('최상위') || lower.includes('top target') || lower.includes('top_target') || lower.includes('critical') || lower.includes('urgent') || lower.includes('긴급') || lower.includes('즉시')) return 'critical'
+  if (lower.includes('osint') || lower.includes('조사 필요') || lower.includes('조사필요') || lower.includes('investigation') || lower.includes('high') || lower.includes('주의')) return 'high'
+  if (lower.includes('모니터링') || lower.includes('monitoring') || lower.includes('watch') || lower.includes('추적')) return 'medium'
+  // recommendation이 있지만 매칭 안 되면 medium
+  if (rec.trim().length > 0) return 'medium'
   return 'low'
 }
 
@@ -91,6 +93,8 @@ export async function runSync(options?: {
     // 1. Jobdori에서 데이터 가져오기
     const syncData: JobdoriSyncData = await fetchSyncData()
 
+    console.log(`📊 Jobdori 데이터: 불법사이트 ${syncData.illegalSites.length}개, 분석결과 ${syncData.analysisResults.length}개, 최신리포트 ${syncData.latestReport ? syncData.latestReport.id : 'null'}, 노트 ${syncData.siteNotes.length}개`)
+
     // 2. 기존 Y-EYE 사이트 목록 가져오기 (도메인 기준 매핑)
     const existingSites = db.prepare('SELECT * FROM sites').all() as any[]
     const existingByDomain = new Map(existingSites.map((s: any) => [s.domain, s]))
@@ -98,17 +102,51 @@ export async function runSync(options?: {
       existingSites.filter((s: any) => s.jobdori_site_id).map((s: any) => [s.jobdori_site_id, s])
     )
 
-    // 3. 분석 결과에서 사이트 동기화
+    console.log(`📋 기존 Y-EYE 사이트: ${existingSites.length}개`)
+
+    // === Phase A: 분석 결과(analysisResults)에서 사이트 동기화 ===
+    if (syncData.analysisResults.length > 0) {
+      // 디버그: recommendation 값 샘플 출력
+      const recSample = syncData.analysisResults.slice(0, 5).map(r => `${r.domain}: "${r.recommendation}"`)
+      console.log(`📝 분석결과 recommendation 샘플:`, recSample)
+    }
+
     for (const analysisResult of syncData.analysisResults) {
       const domain = analysisResult.domain
       const recommendation = analysisResult.recommendation || ''
-      const isTopTarget = recommendation.toLowerCase().includes('최상위') || recommendation.toLowerCase().includes('top target')
-      const isOsintNeeded = recommendation.toLowerCase().includes('osint') || recommendation.toLowerCase().includes('조사 필요')
+      const recLower = recommendation.toLowerCase()
+
+      // 확장된 매칭: 다양한 형태의 recommendation 값 지원
+      const isTopTarget = (
+        recLower.includes('최상위') ||
+        recLower.includes('top target') ||
+        recLower.includes('top_target') ||
+        recLower.includes('critical') ||
+        recLower.includes('urgent') ||
+        recLower.includes('high priority') ||
+        recLower.includes('즉시') ||
+        recLower.includes('긴급')
+      )
+      const isOsintNeeded = (
+        recLower.includes('osint') ||
+        recLower.includes('조사 필요') ||
+        recLower.includes('조사필요') ||
+        recLower.includes('investigation') ||
+        recLower.includes('monitor') ||
+        recLower.includes('모니터링') ||
+        recLower.includes('추적') ||
+        recLower.includes('분석') ||
+        recLower.includes('주의') ||
+        recLower.includes('watch')
+      )
+
+      // recommendation이 있으면(빈 문자열이 아니면) 의미있는 데이터 → 자동 추가 대상
+      const hasRecommendation = recommendation.trim().length > 0
 
       // 자동 추가 대상 판별
       const shouldAutoAdd = (
         (opts.autoAddTopTargets && isTopTarget) ||
-        (opts.autoAddOsintNeeded && isOsintNeeded) ||
+        (opts.autoAddOsintNeeded && (isOsintNeeded || hasRecommendation)) ||
         opts.syncAllIllegal
       )
 
@@ -202,10 +240,45 @@ export async function runSync(options?: {
       }
     }
 
-    // 4. Jobdori sites 테이블에서 상태 변경 감지
+    // 4. Jobdori sites 테이블에서 상태 변경 감지 + 미등록 불법사이트 추가
+    console.log(`🔍 불법사이트 상태 확인: ${syncData.illegalSites.length}개`)
+
     for (const jobdoriSite of syncData.illegalSites) {
       const existing = existingByDomain.get(jobdoriSite.domain)
-      if (!existing) continue
+
+      if (!existing) {
+        // syncAllIllegal이면 미등록 불법사이트도 추가
+        if (opts.syncAllIllegal) {
+          const newSiteId = uuidv4()
+          db.prepare(`
+            INSERT INTO sites (id, domain, display_name, site_type, status, priority, 
+              investigation_status, notes, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          `).run(
+            newSiteId,
+            jobdoriSite.domain,
+            jobdoriSite.domain,
+            mapSiteType(jobdoriSite.site_type),
+            mapSiteStatus(jobdoriSite.site_status),
+            'medium',
+            'pending',
+            `Jobdori 불법사이트 동기화 (${jobdoriSite.site_type || '유형 미확인'})`,
+          )
+          existingByDomain.set(jobdoriSite.domain, { id: newSiteId, domain: jobdoriSite.domain })
+
+          db.prepare(`
+            INSERT INTO timeline_events (id, entity_type, entity_id, event_type, title, description, event_date, source, importance)
+            VALUES (?, 'site', ?, 'sync_add', ?, ?, datetime('now'), 'Jobdori 동기화', 'normal')
+          `).run(
+            uuidv4(),
+            newSiteId,
+            `Jobdori 불법사이트 추가: ${jobdoriSite.domain}`,
+            `유형: ${jobdoriSite.site_type || '미확인'}, 상태: ${jobdoriSite.site_status || '미확인'}`,
+          )
+          result.sitesAdded++
+        }
+        continue
+      }
 
       // site_status 변경 감지
       const newStatus = mapSiteStatus(jobdoriSite.site_status)
@@ -273,7 +346,34 @@ export async function runSync(options?: {
       }
     }
 
-    // 5. 동기화 로그 기록
+    // 5. 사이트 노트 동기화
+    console.log(`📝 사이트 노트 동기화: ${syncData.siteNotes.length}개`)
+    for (const note of syncData.siteNotes) {
+      const existing = existingByDomain.get(note.domain)
+      if (!existing) continue
+
+      // 노트를 OSINT 항목으로 추가 (중복 방지: 같은 content가 이미 있으면 skip)
+      const existingNote = db.prepare(
+        "SELECT id FROM osint_entries WHERE entity_type = 'site' AND entity_id = ? AND raw_input = ?"
+      ).get(existing.id, note.content)
+
+      if (!existingNote) {
+        db.prepare(`
+          INSERT INTO osint_entries (id, entity_type, entity_id, category, title, content, raw_input, source, confidence, is_key_evidence, created_at)
+          VALUES (?, 'site', ?, 'notes', ?, ?, ?, 'Jobdori', 0.7, 0, ?)
+        `).run(
+          uuidv4(),
+          existing.id,
+          `Jobdori 노트: ${note.note_type || '일반'}`,
+          note.content,
+          note.content,
+          note.created_at || new Date().toISOString(),
+        )
+        result.notesImported++
+      }
+    }
+
+    // 6. 동기화 로그 기록
     db.prepare(`
       INSERT INTO sync_logs (id, sync_type, status, sites_added, sites_updated, started_at, completed_at)
       VALUES (?, 'full', 'success', ?, ?, ?, datetime('now'))
@@ -299,7 +399,7 @@ export async function runSync(options?: {
   }
 
   result.duration = Date.now() - startTime
-  console.log(`🔄 동기화 완료: +${result.sitesAdded} 사이트, ~${result.sitesUpdated} 업데이트, ${result.domainChangesDetected} 변경감지 (${result.duration}ms)`)
+  console.log(`🔄 동기화 완료: +${result.sitesAdded} 사이트, ~${result.sitesUpdated} 업데이트, ${result.domainChangesDetected} 변경감지, ${result.notesImported} 노트 (${result.duration}ms)`)
 
   return result
 }

@@ -143,7 +143,7 @@ export async function fetchLatestAnalysisReport(): Promise<JobdoriDomainAnalysis
 export async function fetchAnalysisResults(reportId: number): Promise<JobdoriDomainAnalysisResult[]> {
   if (!pool) throw new Error('DB not connected')
   const res = await pool.query(
-    `SELECT * FROM domain_analysis_results WHERE report_id = ? ORDER BY rank ASC`,
+    `SELECT * FROM domain_analysis_results WHERE report_id = $1 ORDER BY rank ASC`,
     [reportId]
   )
   return res.rows
