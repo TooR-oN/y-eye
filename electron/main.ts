@@ -54,7 +54,7 @@ function createWindow() {
 }
 
 // App lifecycle
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Initialize database
   initDatabase()
   
@@ -62,6 +62,43 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   
   createWindow()
+
+  // Auto-reconnect Jobdori DB from saved .env
+  try {
+    const envPath = path.join(app.getPath('userData'), '.env')
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, 'utf-8')
+      let dbUrl = ''
+      for (const line of content.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('#')) continue
+        const eqIdx = trimmed.indexOf('=')
+        if (eqIdx > 0 && trimmed.substring(0, eqIdx).trim() === 'DATABASE_URL') {
+          dbUrl = trimmed.substring(eqIdx + 1).trim()
+          break
+        }
+      }
+      if (dbUrl) {
+        console.log('[Startup] Attempting Jobdori DB auto-reconnect...')
+        initJobdoriConnection(dbUrl)
+        const testResult = await testJobdoriConnection()
+        if (testResult.success) {
+          console.log('[Startup] Jobdori DB auto-reconnect successful')
+        } else {
+          console.warn('[Startup] Jobdori DB auto-reconnect failed:', testResult.message)
+          // Notify renderer about failed connection
+          mainWindow?.webContents.once('did-finish-load', () => {
+            mainWindow?.webContents.send('jobdori:auto-connect-failed', testResult.message)
+          })
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Startup] Jobdori DB auto-reconnect error:', err.message)
+    mainWindow?.webContents.once('did-finish-load', () => {
+      mainWindow?.webContents.send('jobdori:auto-connect-failed', err.message)
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -522,6 +559,96 @@ function registerIpcHandlers() {
   ipcMain.handle('jobdori:sync', async (_event, options?: any) => {
     try {
       const result = await runSync(options)
+
+      // After successful sync, trigger Obsidian export for changed sites
+      if (result.success && result.changedSiteIds && result.changedSiteIds.length > 0) {
+        const configRow = db.prepare("SELECT value FROM app_settings WHERE key = 'obsidian_config'").get() as any
+        if (configRow) {
+          try {
+            const config = JSON.parse(configRow.value)
+            if (config.vaultPath && config.autoExport) {
+              console.log(`[Sync → Obsidian] Auto-exporting ${result.changedSiteIds.length} changed sites...`)
+              for (const siteId of result.changedSiteIds) {
+                try {
+                  // Reuse the existing obsidian:exportSite logic by emitting IPC internally
+                  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(siteId) as any
+                  if (site) {
+                    // Direct file write (same logic as obsidian:exportSite handler)
+                    const osintEntries = db.prepare("SELECT * FROM osint_entries WHERE entity_type = 'site' AND entity_id = ?").all(siteId) as any[]
+                    const relations = db.prepare(`SELECT psr.*, p.alias, p.real_name FROM person_site_relations psr JOIN persons p ON psr.person_id = p.id WHERE psr.site_id = ?`).all(siteId) as any[]
+                    const timeline = db.prepare("SELECT * FROM timeline_events WHERE entity_type = 'site' AND entity_id = ? ORDER BY event_date DESC").all(siteId) as any[]
+                    const domainHist = db.prepare('SELECT * FROM domain_history WHERE site_id = ? ORDER BY detected_at DESC').all(siteId) as any[]
+                    
+                    const PRIORITY_KR: Record<string, string> = { critical: '긴급', high: '높음', medium: '보통', low: '낮음' }
+                    const STATUS_KR: Record<string, string> = { active: '운영 중', closed: '폐쇄', redirected: '리다이렉트', unknown: '미확인' }
+                    const INVEST_KR: Record<string, string> = { pending: '대기', in_progress: '진행중', completed: '완료', on_hold: '보류' }
+                    
+                    let md = `---\ntype: site\ndomain: "${site.domain}"\nstatus: "${site.status}"\npriority: "${site.priority}"\ninvestigation: "${site.investigation_status}"\ncreated: "${site.created_at}"\nupdated: "${site.updated_at}"\ntags:\n  - y-eye\n  - site\n---\n\n`
+                    md += `# 🌐 ${site.display_name || site.domain}\n\n`
+                    md += `| 항목 | 값 |\n|------|----|\n`
+                    md += `| 도메인 | \`${site.domain}\` |\n`
+                    md += `| 유형 | ${site.site_type || '미분류'} |\n`
+                    md += `| 상태 | ${STATUS_KR[site.status] || site.status} |\n`
+                    md += `| 우선순위 | ${PRIORITY_KR[site.priority] || site.priority} |\n`
+                    md += `| 조사 상태 | ${INVEST_KR[site.investigation_status] || site.investigation_status} |\n`
+                    if (site.traffic_monthly) md += `| 월간 트래픽 | ${site.traffic_monthly} |\n`
+                    if (site.traffic_rank) md += `| 글로벌 순위 | ${site.traffic_rank} |\n`
+                    if (site.recommendation) md += `| 권고사항 | ${site.recommendation} |\n`
+                    md += '\n'
+                    if (site.notes) md += `## 📝 메모\n\n${site.notes}\n\n`
+                    if (osintEntries.length > 0) {
+                      md += `## 🔍 인프라 정보 (${osintEntries.length}건)\n\n`
+                      for (const entry of osintEntries) {
+                        md += `### ${entry.title}\n\n- **카테고리**: ${entry.category || '기타'}\n- **신뢰도**: ${entry.confidence}\n`
+                        if (entry.source) md += `- **출처**: ${entry.source}\n`
+                        if (entry.is_key_evidence) md += `- **⭐ 핵심 증거**\n`
+                        if (entry.content) md += `\n${entry.content}\n`
+                        md += '\n'
+                      }
+                    }
+                    if (relations.length > 0) {
+                      md += `## 👤 연관 인물 (${relations.length}명)\n\n`
+                      for (const rel of relations) {
+                        md += `- **[[${rel.alias || rel.real_name || '미확인'}]]** — 역할: ${rel.role || '미지정'}, 신뢰도: ${rel.confidence}\n`
+                        if (rel.evidence) md += `  - 근거: ${rel.evidence}\n`
+                      }
+                      md += '\n'
+                    }
+                    if (config.includeTimeline && timeline.length > 0) {
+                      md += `## 📅 타임라인 (${timeline.length}건)\n\n`
+                      for (const evt of timeline) {
+                        md += `- **${new Date(evt.event_date).toLocaleDateString('ko-KR')}** — ${evt.title}\n`
+                        if (evt.description) md += `  - ${evt.description}\n`
+                      }
+                      md += '\n'
+                    }
+                    if (config.includeDomainHistory && domainHist.length > 0) {
+                      md += `## 🔄 도메인 변경 이력 (${domainHist.length}건)\n\n`
+                      for (const h of domainHist) {
+                        md += `- **${h.detected_at ? new Date(h.detected_at).toLocaleDateString('ko-KR') : '-'}** — \`${h.domain}\` (${h.status || '-'})\n`
+                        if (h.notes) md += `  - ${h.notes}\n`
+                      }
+                      md += '\n'
+                    }
+                    md += `---\n*Y-EYE에서 자동 생성 — ${new Date().toLocaleString('ko-KR')}*\n`
+                    
+                    const fileName = `${site.domain}.md`
+                    const fullPath = path.join(config.vaultPath, config.sitesFolder || 'Sites', fileName)
+                    const dir = path.dirname(fullPath)
+                    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+                    fs.writeFileSync(fullPath, md, 'utf-8')
+                    console.log(`  [Obsidian] Exported: ${site.domain}`)
+                  }
+                } catch (exportErr: any) {
+                  console.warn(`  [Obsidian] Export failed for site ${siteId}:`, exportErr.message)
+                }
+              }
+              console.log(`[Sync → Obsidian] Auto-export completed`)
+            }
+          } catch (_) { /* ignore config parse errors */ }
+        }
+      }
+
       return result
     } catch (err: any) {
       return { success: false, errors: [err.message] }

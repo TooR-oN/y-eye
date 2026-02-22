@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { TimelineEvent, Site, Person } from '@/shared/types'
 
@@ -22,6 +22,8 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
   person_linked: '🔗',
   evidence_added: '📎',
   sync: '⚡',
+  sync_add: '⚡',
+  recommendation_change: '📌',
   note: '📝',
 }
 
@@ -29,6 +31,7 @@ export default function TimelinePage() {
   const navigate = useNavigate()
   const [events, setEvents] = useState<TimelineEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
   const [filterImportance, setFilterImportance] = useState('')
   const [filterEntityType, setFilterEntityType] = useState('')
   const [filterEntityId, setFilterEntityId] = useState('')
@@ -43,13 +46,11 @@ export default function TimelinePage() {
 
   const loadData = useCallback(async () => {
     try {
-      // Load all timeline events from all entities
       const [sites, persons] = await Promise.all([
         window.electronAPI.sites.list(),
         window.electronAPI.persons.list(),
       ])
 
-      // Cache entity names + store lists for filter
       const names = new Map<string, { name: string; type: string }>()
       sites.forEach((s: Site) => names.set(s.id, { name: s.display_name || s.domain, type: 'site' }))
       persons.forEach((p: Person) => names.set(p.id, { name: p.alias || p.real_name || '미확인', type: 'person' }))
@@ -57,7 +58,6 @@ export default function TimelinePage() {
       setSites(sites)
       setPersons(persons)
 
-      // Load all events
       const allEvents: TimelineEvent[] = []
       for (const site of sites) {
         const siteEvents = await window.electronAPI.timeline.list({
@@ -76,7 +76,6 @@ export default function TimelinePage() {
         allEvents.push(...personEvents)
       }
 
-      // Deduplicate by id and sort by date (newest first)
       const uniqueEvents = Array.from(new Map(allEvents.map(e => [e.id, e])).values())
       uniqueEvents.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime())
       setEvents(uniqueEvents)
@@ -89,33 +88,50 @@ export default function TimelinePage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // Filter events
-  const filteredEvents = events.filter(e => {
-    if (filterImportance && e.importance !== filterImportance) return false
-    if (filterEntityType && e.entity_type !== filterEntityType) return false
-    if (filterEntityId && e.entity_id !== filterEntityId) return false
-    if (filterEventType && e.event_type !== filterEventType) return false
-    return true
-  })
+  // Filter events (including text search)
+  const filteredEvents = useMemo(() => {
+    return events.filter(e => {
+      if (filterImportance && e.importance !== filterImportance) return false
+      if (filterEntityType && e.entity_type !== filterEntityType) return false
+      if (filterEntityId && e.entity_id !== filterEntityId) return false
+      if (filterEventType && e.event_type !== filterEventType) return false
+      if (search) {
+        const term = search.toLowerCase()
+        const entityName = entityNames.get(e.entity_id)?.name || ''
+        if (
+          !e.title.toLowerCase().includes(term) &&
+          !(e.description || '').toLowerCase().includes(term) &&
+          !entityName.toLowerCase().includes(term) &&
+          !(e.source || '').toLowerCase().includes(term)
+        ) return false
+      }
+      return true
+    })
+  }, [events, filterImportance, filterEntityType, filterEntityId, filterEventType, search, entityNames])
 
   // Group events by date
-  const groupedEvents: { date: string; events: TimelineEvent[] }[] = []
-  const dateMap = new Map<string, TimelineEvent[]>()
-  filteredEvents.forEach(e => {
-    const date = new Date(e.event_date).toLocaleDateString('ko-KR', {
-      year: 'numeric', month: 'long', day: 'numeric',
+  const groupedEvents = useMemo(() => {
+    const groups: { date: string; events: TimelineEvent[] }[] = []
+    const dateMap = new Map<string, TimelineEvent[]>()
+    filteredEvents.forEach(e => {
+      const date = new Date(e.event_date).toLocaleDateString('ko-KR', {
+        year: 'numeric', month: 'long', day: 'numeric',
+      })
+      if (!dateMap.has(date)) dateMap.set(date, [])
+      dateMap.get(date)!.push(e)
     })
-    if (!dateMap.has(date)) dateMap.set(date, [])
-    dateMap.get(date)!.push(e)
-  })
-  dateMap.forEach((events, date) => groupedEvents.push({ date, events }))
+    dateMap.forEach((events, date) => groups.push({ date, events }))
+    return groups
+  }, [filteredEvents])
 
   // Unique event types for filter
   const eventTypes = Array.from(new Set(events.map(e => e.event_type)))
 
+  const hasActiveFilters = !!(filterImportance || filterEntityType || filterEntityId || filterEventType || search)
+
   if (loading) {
     return (
-      <div className="p-8 space-y-6">
+      <div className="p-8 space-y-4">
         <div className="titlebar-drag pt-2">
           <div className="titlebar-no-drag">
             <h1 className="page-title">타임라인</h1>
@@ -132,19 +148,30 @@ export default function TimelinePage() {
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-4">
       {/* Header */}
       <div className="titlebar-drag pt-2">
         <div className="titlebar-no-drag flex items-start justify-between">
           <div>
             <h1 className="page-title">타임라인</h1>
-            <p className="page-subtitle">조사 이벤트 시간순 기록 · 전체 {events.length}개 이벤트</p>
+            <p className="page-subtitle">조사 이벤트 시간순 기록</p>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3">
+      {/* Search bar (full width) */}
+      <div>
+        <input
+          type="text"
+          placeholder="이벤트 제목, 설명, 대상 이름 검색..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="input w-full"
+        />
+      </div>
+
+      {/* Filters (below search bar) */}
+      <div className="flex items-center gap-3 flex-wrap">
         <select
           value={filterImportance}
           onChange={e => setFilterImportance(e.target.value)}
@@ -167,7 +194,6 @@ export default function TimelinePage() {
           <option value="person">인물</option>
         </select>
 
-        {/* 특정 사이트/인물 선택 드롭다운 */}
         {filterEntityType === 'site' && (
           <select
             value={filterEntityId}
@@ -204,17 +230,20 @@ export default function TimelinePage() {
           ))}
         </select>
 
-        {(filterImportance || filterEntityType || filterEntityId || filterEventType) && (
+        {hasActiveFilters && (
           <button
-            onClick={() => { setFilterImportance(''); setFilterEntityType(''); setFilterEntityId(''); setFilterEventType('') }}
+            onClick={() => { setFilterImportance(''); setFilterEntityType(''); setFilterEntityId(''); setFilterEventType(''); setSearch('') }}
             className="text-xs text-dark-500 hover:text-dark-300"
           >
             필터 초기화
           </button>
         )}
+      </div>
 
-        <span className="ml-auto text-xs text-dark-500">
-          {filteredEvents.length}개 표시 중
+      {/* Caption */}
+      <div>
+        <span className="text-xs text-dark-500">
+          {filteredEvents.length}개 표시 중 (전체 {events.length}개)
         </span>
       </div>
 

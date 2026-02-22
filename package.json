@@ -1,6 +1,6 @@
 {
   "name": "y-eye",
-  "version": "0.1.0",
+  "version": "0.7.0",
   "description": "OSINT Intelligence Platform for tracking illegal webtoon site operators",
   "main": "dist-electron/main.js",
   "scripts": {

@@ -26,6 +26,7 @@ export interface SyncResult {
   errors: string[]
   duration: number
   timestamp: string
+  changedSiteIds: string[]  // IDs of added/updated sites for Obsidian export
 }
 
 // 권고사항 → priority 매핑
@@ -91,6 +92,7 @@ export async function runSync(options?: {
     errors: [],
     duration: 0,
     timestamp: new Date().toISOString(),
+    changedSiteIds: [],
   }
 
   const db = getDatabase()
@@ -245,6 +247,7 @@ export async function runSync(options?: {
           const values = Object.values(updates)
           db.prepare(`UPDATE sites SET ${fields}, updated_at = datetime('now') WHERE id = ?`).run(...values, existing.id)
           result.sitesUpdated++
+          result.changedSiteIds.push(existing.id)
         }
       } else if (shouldAutoAdd) {
         // 새 사이트 추가
@@ -285,6 +288,7 @@ export async function runSync(options?: {
         )
 
         result.sitesAdded++
+        result.changedSiteIds.push(newSiteId)
       }
     }
 
@@ -324,6 +328,7 @@ export async function runSync(options?: {
             `유형: ${jobdoriSite.site_type || '미확인'}, 상태: ${jobdoriSite.site_status || '미확인'}`,
           )
           result.sitesAdded++
+          result.changedSiteIds.push(newSiteId)
         }
         continue
       }
@@ -359,6 +364,7 @@ export async function runSync(options?: {
           .run(newStatus, existing.id)
 
         result.domainChangesDetected++
+        if (!result.changedSiteIds.includes(existing.id)) result.changedSiteIds.push(existing.id)
       }
 
       // new_url 감지 (도메인 변경)

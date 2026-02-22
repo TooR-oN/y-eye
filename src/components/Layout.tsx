@@ -1,4 +1,5 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import logoImg from '@/assets/logo.png'
 
 const NAV_ITEMS = [
@@ -17,9 +18,47 @@ const BOTTOM_ITEMS = [
 
 export default function Layout() {
   const location = useLocation()
+  const [dbAlert, setDbAlert] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Listen for Jobdori DB auto-reconnect failure
+    if (window.electronAPI?.jobdori?.onAutoConnectFailed) {
+      window.electronAPI.jobdori.onAutoConnectFailed((message: string) => {
+        setDbAlert(message)
+      })
+    }
+    return () => {
+      if (window.electronAPI?.jobdori?.removeAutoConnectListener) {
+        window.electronAPI.jobdori.removeAutoConnectListener()
+      }
+    }
+  }, [])
 
   return (
     <div className="flex h-screen bg-dark-950 text-dark-100 overflow-hidden">
+      {/* Jobdori DB reconnect failure alert */}
+      {dbAlert && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-red-600/95 backdrop-blur-sm px-4 py-3 flex items-center justify-between shadow-lg shadow-red-900/30">
+          <div className="flex items-center gap-3">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="text-sm font-medium text-white">Jobdori DB 자동 연결 실패</p>
+              <p className="text-xs text-red-100/80">{dbAlert}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { window.location.hash = '/jobdori'; setDbAlert(null) }}
+              className="text-xs px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded text-white transition-colors"
+            >
+              동기화 페이지로 이동
+            </button>
+            <button onClick={() => setDbAlert(null)} className="text-white/70 hover:text-white transition-colors px-2 py-1">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
       {/* Sidebar */}
       <aside className="w-60 flex flex-col border-r border-dark-800/50 bg-dark-900/50">
         {/* Title bar drag area + Logo */}
@@ -69,7 +108,7 @@ export default function Layout() {
             </NavLink>
           ))}
           <div className="px-3 pt-2">
-            <p className="text-[10px] text-dark-600">v0.6.4</p>
+            <p className="text-[10px] text-dark-600">v0.7.0</p>
           </div>
         </div>
       </aside>

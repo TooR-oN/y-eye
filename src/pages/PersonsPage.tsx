@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Person } from '@/shared/types'
@@ -16,12 +16,20 @@ const STATUS_LABELS: Record<string, string> = {
   active: '활동 중', identified: '신원 확인', arrested: '체포됨', unknown: '미확인',
 }
 
+type SortKey = 'alias' | 'real_name' | 'risk_level' | 'status' | 'description' | 'updated_at'
+type SortOrder = 'asc' | 'desc'
+
+const RISK_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const PERSON_STATUS_ORDER: Record<string, number> = { active: 0, identified: 1, arrested: 2, unknown: 3 }
+
 export default function PersonsPage() {
   const [persons, setPersons] = useState<Person[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [riskFilter, setRiskFilter] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('updated_at')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const navigate = useNavigate()
 
   const loadPersons = useCallback(async () => {
@@ -40,8 +48,49 @@ export default function PersonsPage() {
 
   useEffect(() => { loadPersons() }, [loadPersons])
 
+  const sortedPersons = useMemo(() => {
+    return [...persons].sort((a, b) => {
+      let cmp = 0
+      switch (sortKey) {
+        case 'alias':
+          cmp = (a.alias || '').localeCompare(b.alias || '')
+          break
+        case 'real_name':
+          cmp = (a.real_name || '').localeCompare(b.real_name || '')
+          break
+        case 'risk_level':
+          cmp = (RISK_ORDER[a.risk_level] ?? 9) - (RISK_ORDER[b.risk_level] ?? 9)
+          break
+        case 'status':
+          cmp = (PERSON_STATUS_ORDER[a.status] ?? 9) - (PERSON_STATUS_ORDER[b.status] ?? 9)
+          break
+        case 'description':
+          cmp = (a.description || '').localeCompare(b.description || '')
+          break
+        case 'updated_at':
+          cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
+          break
+      }
+      return sortOrder === 'asc' ? cmp : -cmp
+    })
+  }, [persons, sortKey, sortOrder])
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortOrder('asc')
+    }
+  }
+
+  function SortIcon({ columnKey }: { columnKey: SortKey }) {
+    if (sortKey !== columnKey) return <span className="text-dark-600 ml-1 text-[10px]">&#8693;</span>
+    return <span className="text-yeye-400 ml-1 text-[10px]">{sortOrder === 'asc' ? '\u2191' : '\u2193'}</span>
+  }
+
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-4">
       {/* Header */}
       <div className="titlebar-drag pt-2 flex items-start justify-between">
         <div className="titlebar-no-drag">
@@ -53,9 +102,19 @@ export default function PersonsPage() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        <input type="text" placeholder="별칭, 실명, 설명 검색..." value={search} onChange={e => setSearch(e.target.value)} className="input flex-1 max-w-xs" />
+      {/* Search bar (full width) */}
+      <div>
+        <input
+          type="text"
+          placeholder="별칭, 실명, 설명 검색..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="input w-full"
+        />
+      </div>
+
+      {/* Filters (below search) */}
+      <div className="flex gap-3 items-center">
         <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)} className="select w-32">
           <option value="">전체 위험도</option>
           <option value="critical">긴급</option>
@@ -63,14 +122,17 @@ export default function PersonsPage() {
           <option value="medium">보통</option>
           <option value="low">낮음</option>
         </select>
-        <div className="flex-1" />
-        <span className="text-sm text-dark-500 self-center">{persons.length}명</span>
+        {riskFilter && (
+          <button onClick={() => setRiskFilter('')} className="text-xs text-dark-500 hover:text-dark-300">
+            필터 초기화
+          </button>
+        )}
       </div>
 
-      {/* Persons Grid */}
+      {/* Persons Table */}
       {loading ? (
-        <div className="grid grid-cols-3 gap-4">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-32 bg-dark-800/50 rounded-xl animate-pulse" />)}
+        <div className="space-y-2">
+          {[...Array(5)].map((_, i) => <div key={i} className="h-14 bg-dark-800/50 rounded-lg animate-pulse" />)}
         </div>
       ) : persons.length === 0 ? (
         <div className="card text-center py-16">
@@ -82,32 +144,72 @@ export default function PersonsPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
-          {persons.map(person => (
-            <div key={person.id} className="card-hover" onClick={() => navigate(`/persons/${person.id}`)}>
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-dark-700 flex items-center justify-center text-lg">
-                    👤
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-dark-100">{person.alias || '별칭 미지정'}</p>
-                    {person.real_name && <p className="text-xs text-dark-400">{person.real_name}</p>}
-                  </div>
-                </div>
-                <span className={`badge ${RISK_COLORS[person.risk_level]}`}>
-                  {RISK_LABELS[person.risk_level]}
-                </span>
-              </div>
-              {person.description && (
-                <p className="text-xs text-dark-500 mt-3 line-clamp-2">{person.description}</p>
-              )}
-              <div className="flex items-center justify-between mt-3 text-[10px] text-dark-500">
-                <span>{STATUS_LABELS[person.status] || person.status}</span>
-                <span>{new Date(person.updated_at).toLocaleDateString('ko-KR')}</span>
-              </div>
-            </div>
-          ))}
+        <div className="card p-0 overflow-hidden">
+          {/* Caption */}
+          <div className="px-4 py-2 border-b border-dark-700/30">
+            <span className="text-xs text-dark-500">{sortedPersons.length}명</span>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-dark-700/50">
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('alias')}>
+                  별칭<SortIcon columnKey="alias" />
+                </th>
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('real_name')}>
+                  실명<SortIcon columnKey="real_name" />
+                </th>
+                <th className="table-header px-4 py-3 text-center cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('risk_level')}>
+                  위험도<SortIcon columnKey="risk_level" />
+                </th>
+                <th className="table-header px-4 py-3 text-center cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('status')}>
+                  상태<SortIcon columnKey="status" />
+                </th>
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('description')}>
+                  설명<SortIcon columnKey="description" />
+                </th>
+                <th className="table-header px-4 py-3 text-right cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('updated_at')}>
+                  업데이트<SortIcon columnKey="updated_at" />
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedPersons.map(person => (
+                <tr
+                  key={person.id}
+                  className="table-row cursor-pointer"
+                  onClick={() => navigate(`/persons/${person.id}`)}
+                >
+                  <td className="table-cell font-medium text-dark-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-dark-700 flex items-center justify-center text-sm flex-shrink-0">
+                        👤
+                      </div>
+                      <span>{person.alias || '별칭 미지정'}</span>
+                    </div>
+                  </td>
+                  <td className="table-cell text-dark-300 text-sm">
+                    {person.real_name || '-'}
+                  </td>
+                  <td className="table-cell text-center">
+                    <span className={`badge ${RISK_COLORS[person.risk_level]}`}>
+                      {RISK_LABELS[person.risk_level]}
+                    </span>
+                  </td>
+                  <td className="table-cell text-center">
+                    <span className="text-xs text-dark-400">
+                      {STATUS_LABELS[person.status] || person.status}
+                    </span>
+                  </td>
+                  <td className="table-cell text-xs text-dark-400 max-w-[250px] truncate">
+                    {person.description || '-'}
+                  </td>
+                  <td className="table-cell text-right text-xs text-dark-500">
+                    {new Date(person.updated_at).toLocaleDateString('ko-KR')}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

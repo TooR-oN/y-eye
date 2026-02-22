@@ -115,6 +115,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     search: (searchTerm: string) => ipcRenderer.invoke('jobdori:search', searchTerm),
     sitesByRecommendation: (recommendation?: string) => ipcRenderer.invoke('jobdori:sites-by-recommendation', recommendation),
     envPath: () => ipcRenderer.invoke('jobdori:env-path'),
+    onAutoConnectFailed: (callback: (message: string) => void) => {
+      ipcRenderer.on('jobdori:auto-connect-failed', (_event, message) => callback(message))
+    },
+    removeAutoConnectListener: () => {
+      ipcRenderer.removeAllListeners('jobdori:auto-connect-failed')
+    },
   },
 
   // App Settings (Generic)

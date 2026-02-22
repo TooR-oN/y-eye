@@ -1,8 +1,15 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { v4 as uuidv4 } from 'uuid'
 import type { Site } from '@/shared/types'
 import { SITE_TYPES } from '@/shared/types'
+
+type SortKey = 'domain' | 'site_type' | 'status' | 'priority' | 'investigation_status' | 'recommendation' | 'updated_at'
+type SortOrder = 'asc' | 'desc'
+
+const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const STATUS_ORDER: Record<string, number> = { active: 0, redirected: 1, closed: 2, unknown: 3 }
+const INVEST_ORDER: Record<string, number> = { in_progress: 0, pending: 1, on_hold: 2, completed: 3 }
 
 export default function SitesPage() {
   const [sites, setSites] = useState<Site[]>([])
@@ -11,6 +18,8 @@ export default function SitesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
+  const [sortKey, setSortKey] = useState<SortKey>('updated_at')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const navigate = useNavigate()
 
   const loadSites = useCallback(async () => {
@@ -30,8 +39,54 @@ export default function SitesPage() {
 
   useEffect(() => { loadSites() }, [loadSites])
 
+  // Client-side sorting
+  const sortedSites = useMemo(() => {
+    const sorted = [...sites].sort((a, b) => {
+      let cmp = 0
+      switch (sortKey) {
+        case 'domain':
+          cmp = (a.domain || '').localeCompare(b.domain || '')
+          break
+        case 'site_type':
+          cmp = (a.site_type || '').localeCompare(b.site_type || '')
+          break
+        case 'status':
+          cmp = (STATUS_ORDER[a.status] ?? 9) - (STATUS_ORDER[b.status] ?? 9)
+          break
+        case 'priority':
+          cmp = (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9)
+          break
+        case 'investigation_status':
+          cmp = (INVEST_ORDER[a.investigation_status] ?? 9) - (INVEST_ORDER[b.investigation_status] ?? 9)
+          break
+        case 'recommendation':
+          cmp = (a.recommendation || '').localeCompare(b.recommendation || '')
+          break
+        case 'updated_at':
+          cmp = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()
+          break
+      }
+      return sortOrder === 'asc' ? cmp : -cmp
+    })
+    return sorted
+  }, [sites, sortKey, sortOrder])
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortOrder('asc')
+    }
+  }
+
+  function SortIcon({ columnKey }: { columnKey: SortKey }) {
+    if (sortKey !== columnKey) return <span className="text-dark-600 ml-1 text-[10px]">⇅</span>
+    return <span className="text-yeye-400 ml-1 text-[10px]">{sortOrder === 'asc' ? '↑' : '↓'}</span>
+  }
+
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-4">
       {/* Header */}
       <div className="titlebar-drag pt-2 flex items-start justify-between">
         <div className="titlebar-no-drag">
@@ -43,15 +98,19 @@ export default function SitesPage() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
+      {/* Search bar (full width) */}
+      <div>
         <input
           type="text"
-          placeholder="도메인 또는 메모 검색..."
+          placeholder="도메인, 메모 또는 권고사항 검색..."
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="input flex-1 max-w-xs"
+          className="input w-full"
         />
+      </div>
+
+      {/* Filters (below search bar) */}
+      <div className="flex gap-3 items-center">
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="select w-32">
           <option value="">전체 상태</option>
           <option value="active">운영 중</option>
@@ -66,8 +125,14 @@ export default function SitesPage() {
           <option value="medium">보통</option>
           <option value="low">낮음</option>
         </select>
-        <div className="flex-1" />
-        <span className="text-sm text-dark-500 self-center">{sites.length}개 사이트</span>
+        {(statusFilter || priorityFilter) && (
+          <button
+            onClick={() => { setStatusFilter(''); setPriorityFilter('') }}
+            className="text-xs text-dark-500 hover:text-dark-300"
+          >
+            필터 초기화
+          </button>
+        )}
       </div>
 
       {/* Sites Table */}
@@ -86,20 +151,38 @@ export default function SitesPage() {
         </div>
       ) : (
         <div className="card p-0 overflow-hidden">
+          {/* Caption */}
+          <div className="px-4 py-2 border-b border-dark-700/30">
+            <span className="text-xs text-dark-500">{sortedSites.length}개 사이트</span>
+          </div>
           <table className="w-full">
             <thead>
               <tr className="border-b border-dark-700/50">
-                <th className="table-header px-4 py-3 text-left">도메인</th>
-                <th className="table-header px-4 py-3 text-left">유형</th>
-                <th className="table-header px-4 py-3 text-center">상태</th>
-                <th className="table-header px-4 py-3 text-center">우선순위</th>
-                <th className="table-header px-4 py-3 text-center">조사 상태</th>
-                <th className="table-header px-4 py-3 text-left">권고사항</th>
-                <th className="table-header px-4 py-3 text-right">업데이트</th>
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('domain')}>
+                  도메인<SortIcon columnKey="domain" />
+                </th>
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('site_type')}>
+                  유형<SortIcon columnKey="site_type" />
+                </th>
+                <th className="table-header px-4 py-3 text-center cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('status')}>
+                  상태<SortIcon columnKey="status" />
+                </th>
+                <th className="table-header px-4 py-3 text-center cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('priority')}>
+                  우선순위<SortIcon columnKey="priority" />
+                </th>
+                <th className="table-header px-4 py-3 text-center cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('investigation_status')}>
+                  조사 상태<SortIcon columnKey="investigation_status" />
+                </th>
+                <th className="table-header px-4 py-3 text-left cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('recommendation')}>
+                  권고사항<SortIcon columnKey="recommendation" />
+                </th>
+                <th className="table-header px-4 py-3 text-right cursor-pointer select-none hover:text-dark-200 transition-colors" onClick={() => handleSort('updated_at')}>
+                  업데이트<SortIcon columnKey="updated_at" />
+                </th>
               </tr>
             </thead>
             <tbody>
-              {sites.map(site => (
+              {sortedSites.map(site => (
                 <tr
                   key={site.id}
                   className="table-row cursor-pointer"

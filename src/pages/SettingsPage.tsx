@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ObsidianConfig } from '@/shared/types'
 
@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [vaultValid, setVaultValid] = useState<boolean | null>(null)
+  const [isDirty, setIsDirty] = useState(false)
   const importFileRef = useRef<HTMLInputElement>(null)
 
   // AI Settings
@@ -27,9 +28,45 @@ export default function SettingsPage() {
   const [aiApiKey, setAiApiKey] = useState('')
   const [aiModel, setAiModel] = useState('')
 
+  // Refs to hold latest values for auto-save (avoids stale closures)
+  const obsidianConfigRef = useRef(obsidianConfig)
+  const aiEngineRef = useRef(aiEngine)
+  const aiApiKeyRef = useRef(aiApiKey)
+  const aiModelRef = useRef(aiModel)
+  const isDirtyRef = useRef(false)
+
+  useEffect(() => { obsidianConfigRef.current = obsidianConfig }, [obsidianConfig])
+  useEffect(() => { aiEngineRef.current = aiEngine }, [aiEngine])
+  useEffect(() => { aiApiKeyRef.current = aiApiKey }, [aiApiKey])
+  useEffect(() => { aiModelRef.current = aiModel }, [aiModel])
+  useEffect(() => { isDirtyRef.current = isDirty }, [isDirty])
+
   useEffect(() => {
     loadSettings()
   }, [])
+
+  // Auto-save on page unload (navigation away)
+  const autoSave = useCallback(async () => {
+    if (!isDirtyRef.current) return
+    try {
+      await window.electronAPI.obsidian.saveConfig(obsidianConfigRef.current)
+      if (window.electronAPI?.settings) {
+        await window.electronAPI.settings.set('ai_config', JSON.stringify({
+          engine: aiEngineRef.current,
+          apiKey: aiApiKeyRef.current,
+          model: aiModelRef.current,
+        }))
+      }
+      console.log('[Settings] Auto-saved on page exit')
+    } catch (err) {
+      console.error('[Settings] Auto-save failed:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    // Save when navigating away (component unmount)
+    return () => { autoSave() }
+  }, [autoSave])
 
   async function loadSettings() {
     try {
@@ -73,6 +110,7 @@ export default function SettingsPage() {
       }
 
       setSaved(true)
+      setIsDirty(false)
       if (obsidianConfig.vaultPath) setVaultValid(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (err) {
@@ -85,6 +123,7 @@ export default function SettingsPage() {
   function handleVaultPathChange(path: string) {
     setObsidianConfig(prev => ({ ...prev, vaultPath: path }))
     setVaultValid(null) // reset validation
+    setIsDirty(true)
   }
 
   function handleTestVault() {
@@ -196,7 +235,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={obsidianConfig.sitesFolder}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, sitesFolder: e.target.value }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, sitesFolder: e.target.value })); setIsDirty(true) }}
                 className="input text-xs"
               />
             </div>
@@ -205,7 +244,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={obsidianConfig.personsFolder}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, personsFolder: e.target.value }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, personsFolder: e.target.value })); setIsDirty(true) }}
                 className="input text-xs"
               />
             </div>
@@ -214,7 +253,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={obsidianConfig.reportsFolder}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, reportsFolder: e.target.value }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, reportsFolder: e.target.value })); setIsDirty(true) }}
                 className="input text-xs"
               />
             </div>
@@ -223,7 +262,7 @@ export default function SettingsPage() {
               <input
                 type="text"
                 value={obsidianConfig.domainChangesFolder}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, domainChangesFolder: e.target.value }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, domainChangesFolder: e.target.value })); setIsDirty(true) }}
                 className="input text-xs"
               />
             </div>
@@ -253,7 +292,7 @@ export default function SettingsPage() {
               <input
                 type="checkbox"
                 checked={obsidianConfig.autoExport}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, autoExport: e.target.checked }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, autoExport: e.target.checked })); setIsDirty(true) }}
                 className="rounded border-dark-600 bg-dark-800 text-yeye-500"
               />
               <div>
@@ -265,7 +304,7 @@ export default function SettingsPage() {
               <input
                 type="checkbox"
                 checked={obsidianConfig.includeTimeline}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, includeTimeline: e.target.checked }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, includeTimeline: e.target.checked })); setIsDirty(true) }}
                 className="rounded border-dark-600 bg-dark-800 text-yeye-500"
               />
               <div>
@@ -277,7 +316,7 @@ export default function SettingsPage() {
               <input
                 type="checkbox"
                 checked={obsidianConfig.includeDomainHistory}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, includeDomainHistory: e.target.checked }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, includeDomainHistory: e.target.checked })); setIsDirty(true) }}
                 className="rounded border-dark-600 bg-dark-800 text-yeye-500"
               />
               <div>
@@ -289,7 +328,7 @@ export default function SettingsPage() {
               <input
                 type="checkbox"
                 checked={obsidianConfig.includeRelatedEntities}
-                onChange={e => setObsidianConfig(prev => ({ ...prev, includeRelatedEntities: e.target.checked }))}
+                onChange={e => { setObsidianConfig(prev => ({ ...prev, includeRelatedEntities: e.target.checked })); setIsDirty(true) }}
                 className="rounded border-dark-600 bg-dark-800 text-yeye-500"
               />
               <div>
@@ -334,6 +373,7 @@ export default function SettingsPage() {
               onChange={e => {
                 setAiEngine(e.target.value)
                 setAiModel('') // reset model when engine changes
+                setIsDirty(true)
               }}
             >
               <option value="mock">Mock (내장 분석)</option>
@@ -349,7 +389,7 @@ export default function SettingsPage() {
                 type="password"
                 className="input"
                 value={aiApiKey}
-                onChange={e => setAiApiKey(e.target.value)}
+                onChange={e => { setAiApiKey(e.target.value); setIsDirty(true) }}
                 placeholder={aiEngine === 'claude' ? 'sk-ant-...' : 'sk-...'}
               />
             </div>
@@ -360,7 +400,7 @@ export default function SettingsPage() {
               <select
                 className="select"
                 value={aiModel}
-                onChange={e => setAiModel(e.target.value)}
+                onChange={e => { setAiModel(e.target.value); setIsDirty(true) }}
               >
                 {aiEngine === 'claude' && (
                   <>
